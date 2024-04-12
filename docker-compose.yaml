@@ -1,0 +1,29 @@
+name: go-migrations
+
+services:
+
+  lib-dev:
+    build:
+      context: ./
+      dockerfile: .docker/Dockerfile
+      target: go-base
+      args:
+        - APP_BASE_DIR=${APP_BASE_DIR}
+    container_name: lib-dev
+    volumes:
+      - type: bind
+        source: ./
+        target: ${APP_BASE_DIR}
+    restart: unless-stopped
+    tty: true
+
+  mysql:
+    image: mysql:8.0.36-debian
+    container_name: mysql
+    environment:
+      APP_ENV: dev
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+    ports:
+      - target: ${MYSQL_PORT}
+        published: ${MYSQL_PORT}
