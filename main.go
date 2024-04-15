@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"runtime"
 
-	"github.com/rsgcata/go-migrations/migrations"
+	"github.com/rsgcata/go-migrations/migration"
 )
 
 func main() {
@@ -14,6 +14,7 @@ func main() {
 	basepath := filepath.Dir(b)
 
 	// Generates a blank migration file
-	err := migrations.GenerateBlankMigration(basepath + string(os.PathSeparator) + "tmp")
+	dirPath, _ := migration.NewMigrationsDirPath(basepath + string(os.PathSeparator) + "tmp")
+	err := migration.GenerateBlankMigration(dirPath)
 	fmt.Println(err)
 }
