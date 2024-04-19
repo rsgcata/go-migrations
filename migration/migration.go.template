@@ -3,13 +3,13 @@ package {{.PackageName}}
 type Migration{{.Version}} struct {}
 
 func(migration *Migration{{.Version}}) Version() uint64 {
-    return {{.Version}}
+	return {{.Version}}
 }
 
 func(migration *Migration{{.Version}}) Up() error {
-    return nil
+	return nil
 }
 
 func(migration *Migration{{.Version}}) Down() error {
-    return nil
+	return nil
 }
