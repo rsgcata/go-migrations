@@ -13,6 +13,7 @@ type MigrationsRegistry interface {
 	Register(migration Migration) error
 	OrderedVersions() []uint64
 	Get(version uint64) Migration
+	Count() int
 }
 
 type GenericRegistry struct {
@@ -46,6 +47,10 @@ func (registry *GenericRegistry) Get(version uint64) Migration {
 	return nil
 }
 
+func (registry *GenericRegistry) Count() int {
+	return len(registry.migrations)
+}
+
 type DirMigrationsRegistry struct {
 	GenericRegistry
 	dirPath MigrationsDirPath
@@ -58,7 +63,9 @@ func NewDirMigrationsRegistry(dirPath MigrationsDirPath) *DirMigrationsRegistry 
 // Checks if everything from the migrations directory has been registered in the registry
 // If it returns false, last 2 return values show what's missing and what's extra in the registry
 // Errors if reading the directory fails (maybe insufficient permissions?)
-func (registry *DirMigrationsRegistry) HasAllMigrationsRegistered() (bool, []string, []string, error) {
+func (registry *DirMigrationsRegistry) HasAllMigrationsRegistered() (
+	bool, []string, []string, error,
+) {
 	dirEntries, err := os.ReadDir(string(registry.dirPath))
 	if err != nil {
 		return false, []string{}, []string{}, fmt.Errorf(
@@ -88,7 +95,7 @@ func (registry *DirMigrationsRegistry) HasAllMigrationsRegistered() (bool, []str
 		if _, ok := registeredCopy[uint64(version)]; ok {
 			delete(registeredCopy, uint64(version))
 		} else {
-			missing = append(missing, FileNamePrefix+FileNameSeparator+strconv.Itoa(version)+".go")
+			missing = append(missing, item.Name())
 		}
 	}
 
