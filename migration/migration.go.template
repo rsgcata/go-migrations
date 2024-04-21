@@ -3,7 +3,7 @@ package {{.PackageName}}
 type Migration{{.Version}} struct {}
 
 func(migration *Migration{{.Version}}) Version() uint64 {
-	return {{.Version}}
+	return {{.Version}} // Do not edit this! If you do, migrations may run out of order
 }
 
 func(migration *Migration{{.Version}}) Up() error {
