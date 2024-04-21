@@ -7,13 +7,12 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"text/template"
 	"time"
 )
 
 //go:embed migration.go.template
-var tmplContents string
+var TmplContents string
 
 const FileNamePrefix = "version"
 const FileNameSeparator = "_"
@@ -31,23 +30,25 @@ type migrationTemplateData struct {
 
 type MigrationsDirPath string
 
+var ErrCreateMigrationsDirPath = errors.New("could not create new migrations directory path")
+var ErrBlankMigration = errors.New("could not generate blank migration")
+
 func NewMigrationsDirPath(dirPath string) (MigrationsDirPath, error) {
 	fileInfo, err := os.Stat(dirPath)
 
 	if err != nil {
 		return "", fmt.Errorf(
-			"could not create new migration directory path. Could not initialize file info"+
-				" with error: %w", err,
+			"%w, file info init error: %w", ErrCreateMigrationsDirPath, err,
 		)
 	}
 
 	if !fileInfo.IsDir() {
-		return "", errors.New(
-			"could not create new migration directory path. The provided path is not a directory",
+		return "", fmt.Errorf(
+			"%w, the provided path is not a directory", ErrCreateMigrationsDirPath,
 		)
 	}
 
-	return MigrationsDirPath(strings.TrimRight(dirPath, string(os.PathSeparator))), nil
+	return MigrationsDirPath(dirPath), nil
 }
 
 func newMigrationTemplateData(dirPath MigrationsDirPath) migrationTemplateData {
@@ -55,32 +56,32 @@ func newMigrationTemplateData(dirPath MigrationsDirPath) migrationTemplateData {
 }
 
 func GenerateBlankMigration(dirPath MigrationsDirPath) error {
-	tmpl, err := template.New("migration").Parse(tmplContents)
+	tmpl, err := template.New("migration").Parse(TmplContents)
 
 	if err != nil {
 		return fmt.Errorf(
-			"could not generate blank migration. Temaplate parsing failed with"+
-				" error: %w", err,
+			"%w, template parsing failed with error: %w", ErrBlankMigration, err,
 		)
 	}
 
 	tmplData := newMigrationTemplateData(dirPath)
-	filePath := string(dirPath) + string(os.PathSeparator) +
-		FileNamePrefix + FileNameSeparator + strconv.Itoa(int(tmplData.Version)) + ".go"
-	fmt.Println(filePath)
+
+	filePath := filepath.Join(
+		string(dirPath),
+		FileNamePrefix+FileNameSeparator+strconv.Itoa(int(tmplData.Version))+".go",
+	)
 	file, err := os.OpenFile(filePath, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0600)
 
 	if err != nil {
 		return fmt.Errorf(
-			"could not generate blank migration. File creation failed with error: %w", err,
+			"%w, file creation failed with error: %w", ErrBlankMigration, err,
 		)
 	}
 	defer file.Close()
 
 	if err = tmpl.Execute(file, tmplData); err != nil {
 		return fmt.Errorf(
-			"could not generate blank migration. Failed to generate contents with"+
-				" error: %w", err,
+			"%w, failed to generate contents with error: %w", ErrBlankMigration, err,
 		)
 	}
 
