@@ -55,35 +55,38 @@ func newMigrationTemplateData(dirPath MigrationsDirPath) migrationTemplateData {
 	return migrationTemplateData{uint64(time.Now().Unix()), filepath.Base(string(dirPath))}
 }
 
-func GenerateBlankMigration(dirPath MigrationsDirPath) error {
+// Generates a blank migration file in the specified directory
+// Returns the generated file name
+// Errors if template processing failed or file creation failed
+func GenerateBlankMigration(dirPath MigrationsDirPath) (string, error) {
 	tmpl, err := template.New("migration").Parse(TmplContents)
 
 	if err != nil {
-		return fmt.Errorf(
+		return "", fmt.Errorf(
 			"%w, template parsing failed with error: %w", ErrBlankMigration, err,
 		)
 	}
 
 	tmplData := newMigrationTemplateData(dirPath)
+	fileName := FileNamePrefix + FileNameSeparator + strconv.Itoa(int(tmplData.Version)) + ".go"
+	filePath := filepath.Join(string(dirPath), fileName)
 
-	filePath := filepath.Join(
-		string(dirPath),
-		FileNamePrefix+FileNameSeparator+strconv.Itoa(int(tmplData.Version))+".go",
-	)
-	file, err := os.OpenFile(filePath, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0600)
+	file, err := os.OpenFile(filePath, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0600)
 
 	if err != nil {
-		return fmt.Errorf(
+		return "", fmt.Errorf(
 			"%w, file creation failed with error: %w", ErrBlankMigration, err,
 		)
 	}
 	defer file.Close()
 
 	if err = tmpl.Execute(file, tmplData); err != nil {
-		return fmt.Errorf(
+		file.Close()
+		os.Remove(filePath)
+		return "", fmt.Errorf(
 			"%w, failed to generate contents with error: %w", ErrBlankMigration, err,
 		)
 	}
 
-	return nil
+	return fileName, nil
 }

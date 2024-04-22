@@ -20,10 +20,14 @@ type GenericRegistry struct {
 	migrations map[uint64]Migration
 }
 
+func NewGenericRegistry() *GenericRegistry {
+	return &GenericRegistry{make(map[uint64]Migration)}
+}
+
 func (registry *GenericRegistry) Register(migration Migration) error {
 	if _, ok := registry.migrations[migration.Version()]; ok {
 		return errors.New(
-			"failed to register new migration. The migration is laready registered",
+			"failed to register new migration. The migration is already registered",
 		)
 	}
 
@@ -57,11 +61,12 @@ type DirMigrationsRegistry struct {
 }
 
 func NewDirMigrationsRegistry(dirPath MigrationsDirPath) *DirMigrationsRegistry {
-	return &DirMigrationsRegistry{GenericRegistry{make(map[uint64]Migration)}, dirPath}
+	return &DirMigrationsRegistry{*NewGenericRegistry(), dirPath}
 }
 
-// Checks if everything from the migrations directory has been registered in the registry
-// If it returns false, last 2 return values show what's missing and what's extra in the registry
+// Checks if everything from the migrations directory has been registered in the registry.
+// If it returns false, next 2 return values show which file nanes are missing and which
+// file names are extra, compare to the registered migrations.
 // Errors if reading the directory fails (maybe insufficient permissions?)
 func (registry *DirMigrationsRegistry) HasAllMigrationsRegistered() (
 	bool, []string, []string, error,

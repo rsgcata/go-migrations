@@ -1,6 +1,7 @@
 package migration
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -58,16 +59,16 @@ func (suite *MigrationTestSuite) TestItDoesNotAcceptFilesForNewMigrationsDirPath
 func (suite *MigrationTestSuite) TestItCanGenerateBlankMigrationFile() {
 	migDir, _ := NewMigrationsDirPath(suite.migrationsDirPath)
 	timeBefore := time.Now().Unix()
-	GenerateBlankMigration(migDir)
+	fileName, err := GenerateBlankMigration(migDir)
 	timeAfter := time.Now().Unix()
-	lf, _ := os.ReadDir(suite.migrationsDirPath)
-	fileName := lf[0].Name()
 	fileContents, _ := os.ReadFile(filepath.Join(suite.migrationsDirPath, fileName))
 	versionString := strings.TrimRight(
 		strings.TrimLeft(fileName, FileNamePrefix+FileNameSeparator),
 		".go",
 	)
 	verstionInt, _ := strconv.Atoi(versionString)
+
+	suite.Assert().Nil(err)
 	suite.Assert().True(
 		int64(verstionInt) >= timeBefore && int64(verstionInt) <= timeAfter,
 	)
@@ -83,4 +84,26 @@ func (suite *MigrationTestSuite) TestItCanGenerateBlankMigrationFile() {
 		"func\\(migration \\*Migration"+versionString+"\\) Version\\(\\) uint64 \\{[\\s]+return "+versionString,
 		string(fileContents),
 	)
+}
+
+func (suite *MigrationTestSuite) TestItFailsToGenerateTemplateWithInvalidTemplateData() {
+	oldTemplateContents := TmplContents
+	TmplContents = "package {{.Missing}}"
+	defer func() {
+		TmplContents = oldTemplateContents
+	}()
+	migDir, _ := NewMigrationsDirPath(suite.migrationsDirPath)
+	_, err := GenerateBlankMigration(migDir)
+
+	suite.Assert().ErrorContains(err, "failed to generate contents")
+
+	filesCount := 0
+	items, _ := os.ReadDir(suite.migrationsDirPath)
+	for _, item := range items {
+		if !item.Type().IsDir() {
+			filesCount++
+			fmt.Println(item.Name())
+		}
+	}
+	suite.Assert().Equal(0, filesCount, "generated migration file was not removed")
 }
