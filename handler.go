@@ -92,7 +92,7 @@ func (handler *MigrationsHandler) MigrateUp(migration migration.Migration) (
 	nextVersion := orderedAvailableVersions[executionsCount+1]
 	prevExecution := handler.getPrevExecution()
 
-	if !prevExecution.ExecutionFinished() {
+	if !prevExecution.Finished() {
 		nextVersion = prevExecution.Version
 	}
 
@@ -106,7 +106,7 @@ func (handler *MigrationsHandler) MigrateUp(migration migration.Migration) (
 		)
 	}
 
-	execution.EndExecution()
+	execution.FinishExecution()
 	handler.executions[execution.Version] = execution
 
 	return nextMigration, execution, nil

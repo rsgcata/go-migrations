@@ -16,13 +16,13 @@ func StartExecution(migration migration.Migration) *MigrationExecution {
 	return &MigrationExecution{migration.Version(), uint64(time.Now().UnixMilli()), 0}
 }
 
-func (execution *MigrationExecution) EndExecution() {
-	if execution.FinishedAtMs == 0 {
+func (execution *MigrationExecution) FinishExecution() {
+	if !execution.Finished() {
 		execution.FinishedAtMs = uint64(time.Now().UnixMilli())
 	}
 }
 
-func (execution MigrationExecution) ExecutionFinished() bool {
+func (execution MigrationExecution) Finished() bool {
 	return execution.FinishedAtMs > 0
 }
 

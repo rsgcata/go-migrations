@@ -10,6 +10,8 @@ services:
       args:
         - APP_BASE_DIR=${APP_BASE_DIR}
     container_name: lib-dev
+    env_file:
+      - .env
     volumes:
       - type: bind
         source: ./
