@@ -124,6 +124,7 @@ func (handler *MigrationsHandler) MigrateUp() (HandledMigration, error) {
 	}
 
 	execution.FinishExecution()
+	handler.executionsRepository.Save(*execution)
 	handler.executions[execution.Version] = execution
 
 	return HandledMigration{nextMigration, execution}, nil
@@ -144,6 +145,7 @@ func (handler *MigrationsHandler) MigrateDown() (HandledMigration, error) {
 		)
 	}
 
+	handler.executionsRepository.Remove(*prevExecution)
 	delete(handler.executions, prevExecution.Version)
 	return HandledMigration{prevMigration, prevExecution}, nil
 }
@@ -152,11 +154,13 @@ func (handler *MigrationsHandler) MigrateAllDown() ([]HandledMigration, error) {
 	handledMigrations := []HandledMigration{}
 
 	var err error
-	for {
+	for err == nil {
 		handledMig, errDown := handler.MigrateDown()
 		err = errDown
-		handledMigrations = append(handledMigrations, handledMig)
-		if handledMig.Execution == nil || err != nil {
+
+		if handledMig.Execution != nil {
+			handledMigrations = append(handledMigrations, handledMig)
+		} else {
 			break
 		}
 	}

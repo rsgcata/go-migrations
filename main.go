@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
+	"path/filepath"
+	"runtime"
 
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/rsgcata/go-migrations/migration"
@@ -14,7 +16,8 @@ import (
 
 func main() {
 	ctx := context.Background()
-	dirPath, err := migration.NewMigrationsDirPath("D:\\go-migrations\\tmp")
+	_, filename, _, _ := runtime.Caller(0)
+	dirPath, err := migration.NewMigrationsDirPath(filepath.Dir(filename))
 
 	if err != nil {
 		fmt.Println("Invalid migrations path", err)
