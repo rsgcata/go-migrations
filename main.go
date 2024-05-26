@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/rsgcata/go-migrations/migration"
@@ -17,59 +18,67 @@ import (
 func main() {
 	ctx := context.Background()
 	_, filename, _, _ := runtime.Caller(0)
-	dirPath, err := migration.NewMigrationsDirPath(filepath.Dir(filename))
+	dirPath, err := migration.NewMigrationsDirPath(
+		filepath.Join(filepath.Dir(filename), "tmp"),
+	)
 
 	if err != nil {
 		fmt.Println("Invalid migrations path", err)
 		os.Exit(1)
 	}
 
-	db, err := newDb()
-
-	if err != nil {
-		fmt.Println("Failed to connect to db", err)
-		os.Exit(1)
-	}
+	db := newDb()
 
 	migRegistry := migration.NewDirMigrationsRegistry(dirPath)
-	populateRegistry(migRegistry, db, ctx)
+	populateRegistry(migRegistry, ctx)
 	repo := repository.NewMysqlHandler(db, "migration_executions", context.Background())
-	handler, err := NewExecutionsHandler(migRegistry, repo)
 
-	if err != nil {
-		fmt.Println("Failed to build executions handler\n", err)
-		os.Exit(1)
-	}
-
-	Bootstrap(os.Args[1:], handler)
-	// // Generates a blank migration file
-	// dirPath, _ := migration.NewMigrationsDirPath(basepath + string(os.PathSeparator) + "tmp")
-	// err := migration.GenerateBlankMigration(dirPath)
-	// fmt.Println(err)
+	Bootstrap(os.Args[1:], migRegistry, repo, dirPath)
 }
 
-func newDb() (*sql.DB, error) {
+func newDb() *sql.DB {
 	dbName := os.Getenv("MYSQL_DATABASE")
 	dsn := os.Getenv("MYSQL_DSN")
 
 	if dbName == "" {
-		// Needed if tests are ran on the host not docker
 		dbName = "migrations"
 	}
 
 	if dsn == "" {
-		// Needed if tests are ran on the host not docker
+		// Needed if ran from host machine
 		dsn = "root:123456789@tcp(localhost:3306)/" + dbName
 	}
 
-	return sql.Open("mysql", dsn)
+	// DB creation should run only once. This is added only for dev purpose
+	db, _ := sql.Open("mysql", strings.TrimRight(dsn, dbName))
+	db.Query("CREATE DATABASE IF NOT EXISTS " + dbName)
+	db.Close()
+
+	db, err := sql.Open("mysql", dsn)
+
+	// Adjust this as needed, depending how much the migrations will last
+	// Max open connections in some scenarios should be 1 because of repository lock/unlock
+	// behaviour
+	// db.SetMaxOpenConns(1)
+	// db.SetMaxIdleConns(1)
+	// db.SetConnMaxIdleTime(time.Hour)
+	// db.SetConnMaxLifetime(time.Hour)
+
+	if err != nil {
+		panic(err)
+	}
+
+	return db
 }
 
 func populateRegistry(
 	migRegistry *migration.DirMigrationsRegistry,
-	db *sql.DB,
 	ctx context.Context,
 ) {
+	// New db needed to overcome the lock tables limitation where a session
+	// needs to specify all tables it reads from when using LOCK TABLES
+	db := newDb()
+
 	migRegistry.Register(&tmp.Migration1712953077{Db: db})
 	migRegistry.Register(&tmp.Migration1712953080{Db: db})
 	migRegistry.Register(&tmp.Migration1712953083{Db: db, Ctx: ctx})

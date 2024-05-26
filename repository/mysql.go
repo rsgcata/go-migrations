@@ -34,11 +34,15 @@ func (h *MysqlHandler) Init() error {
 	return err
 }
 
+// This will not work properly in some distributed setups like Galera Cluster
+// https://mariadb.com/kb/en/mariadb-galera-cluster-known-limitations/
 func (h *MysqlHandler) Lock() error {
 	_, err := h.db.ExecContext(h.ctx, "LOCK TABLES `"+h.tableName+"` WRITE")
 	return err
 }
 
+// This will not work properly in some distributed setups like Galera Cluster
+// https://mariadb.com/kb/en/mariadb-galera-cluster-known-limitations/
 func (h *MysqlHandler) Unlock() error {
 	_, err := h.db.ExecContext(h.ctx, "UNLOCK TABLES")
 	return err

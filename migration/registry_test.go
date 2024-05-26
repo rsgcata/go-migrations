@@ -35,17 +35,6 @@ func (suite *RegistryTestSuite) TearDownTest() {
 	os.RemoveAll(suite.migrationsDirPath)
 }
 
-type DummyMigration struct {
-	version uint64
-}
-
-func (dm *DummyMigration) Version() uint64 {
-	return dm.version
-}
-
-func (dm *DummyMigration) Up() error   { return nil }
-func (dm *DummyMigration) Down() error { return nil }
-
 func (suite *RegistryTestSuite) TestItCanRegisterMigration() {
 	version := uint64(1234)
 	dm := &DummyMigration{version}
@@ -71,6 +60,17 @@ func (suite *RegistryTestSuite) TestItCanProvideOrderedRegisteredVersions() {
 	registry.Register(&DummyMigration{versions[0]})
 	registry.Register(&DummyMigration{versions[2]})
 	suite.Assert().Equal(versions, registry.OrderedVersions())
+}
+
+func (suite *RegistryTestSuite) TestItCanProvideOrderedRegisteredMigrations() {
+	expectedMigrations := []Migration{
+		&DummyMigration{123}, &DummyMigration{124}, &DummyMigration{125},
+	}
+	registry := NewGenericRegistry()
+	registry.Register(expectedMigrations[1])
+	registry.Register(expectedMigrations[0])
+	registry.Register(expectedMigrations[2])
+	suite.Assert().Equal(expectedMigrations, registry.OrderedMigrations())
 }
 
 func (suite *RegistryTestSuite) TestItCanGetSpecificRegisteredVersion() {

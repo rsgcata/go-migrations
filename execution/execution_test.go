@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rsgcata/go-migrations/migration"
 	"github.com/stretchr/testify/suite"
 )
 
@@ -15,19 +16,8 @@ func TestExecutionTestSuite(t *testing.T) {
 	suite.Run(t, new(ExecutionTestSuite))
 }
 
-type DummyMigration struct {
-	version uint64
-}
-
-func (dm *DummyMigration) Version() uint64 {
-	return dm.version
-}
-
-func (dm *DummyMigration) Up() error   { return nil }
-func (dm *DummyMigration) Down() error { return nil }
-
 func (suite *ExecutionTestSuite) TestItCanStartExecution() {
-	mig := &DummyMigration{123}
+	mig := migration.NewDummyMigration(123)
 	timeBefore := uint64(time.Now().UnixMilli())
 	execution := StartExecution(mig)
 	timeAfter := uint64(time.Now().UnixMilli())
@@ -41,7 +31,7 @@ func (suite *ExecutionTestSuite) TestItCanStartExecution() {
 }
 
 func (suite *ExecutionTestSuite) TestItCanFinishExecution() {
-	execution := StartExecution(&DummyMigration{123})
+	execution := StartExecution(migration.NewDummyMigration(123))
 
 	timeBefore := uint64(time.Now().UnixMilli())
 	execution.FinishExecution()

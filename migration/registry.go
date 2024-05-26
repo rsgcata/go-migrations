@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -12,6 +13,7 @@ import (
 type MigrationsRegistry interface {
 	Register(migration Migration) error
 	OrderedVersions() []uint64
+	OrderedMigrations() []Migration
 	Get(version uint64) Migration
 	Count() int
 }
@@ -42,6 +44,19 @@ func (registry *GenericRegistry) OrderedVersions() []uint64 {
 	}
 	slices.Sort(versions)
 	return versions
+}
+
+func (registry *GenericRegistry) OrderedMigrations() []Migration {
+	var orderedMigrations []Migration
+	for _, mig := range registry.migrations {
+		orderedMigrations = append(orderedMigrations, mig)
+	}
+
+	sort.Slice(orderedMigrations, func(i, j int) bool {
+		return orderedMigrations[i].Version() < orderedMigrations[j].Version()
+	})
+	
+	return orderedMigrations
 }
 
 func (registry *GenericRegistry) Get(version uint64) Migration {

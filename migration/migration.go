@@ -23,6 +23,22 @@ type Migration interface {
 	Down() error
 }
 
+// Dummy migration struct that should be used only in tests
+type DummyMigration struct {
+	version uint64
+}
+
+func NewDummyMigration(version uint64) *DummyMigration {
+	return &DummyMigration{version: version}
+}
+
+func (dm *DummyMigration) Version() uint64 {
+	return dm.version
+}
+
+func (dm *DummyMigration) Up() error   { return nil }
+func (dm *DummyMigration) Down() error { return nil }
+
 type migrationTemplateData struct {
 	Version     uint64
 	PackageName string

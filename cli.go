@@ -3,7 +3,11 @@ package main
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"text/tabwriter"
+
+	"github.com/rsgcata/go-migrations/execution"
+	"github.com/rsgcata/go-migrations/migration"
 )
 
 type Command interface {
@@ -12,19 +16,36 @@ type Command interface {
 	Exec() error
 }
 
-func Bootstrap(args []string, handler *MigrationsHandler) {
+func Bootstrap(
+	args []string,
+	registry migration.MigrationsRegistry,
+	repository execution.Repository,
+	dirPath migration.MigrationsDirPath,
+) {
+	handler, err := NewHandler(registry, repository)
+
+	if err != nil {
+		panic(
+			fmt.Errorf(
+				"coult not bootstrap cli, failed to create new migrations handler with error: %w", err,
+			),
+		)
+	}
+
 	availableCommands := make(map[string]Command)
 
-	prev := &MigratePrevCommand{}
-	next := &MigrateNextCommand{}
+	prev := &MigratePrevCommand{handler: handler}
+	next := &MigrateNextCommand{handler: handler}
 	up := &MigrateUpCommand{handler: handler}
 	down := &MigrateDownCommand{handler: handler}
-	stats := &MigrateStatsCommand{}
+	stats := &MigrateStatsCommand{registry: registry, repository: repository}
+	blank := &GenerateBlankMigrationCommand{dirPath}
 	availableCommands[prev.Name()] = prev
 	availableCommands[next.Name()] = next
 	availableCommands[up.Name()] = up
 	availableCommands[down.Name()] = down
 	availableCommands[stats.Name()] = stats
+	availableCommands[blank.Name()] = blank
 
 	help := &HelpCommand{availableCommands: availableCommands}
 
@@ -39,7 +60,7 @@ func Bootstrap(args []string, handler *MigrationsHandler) {
 			err := cmd.Exec()
 
 			if err != nil {
-				fmt.Println(err)
+				fmt.Println("Failed to execute \"" + cmd.Name() + "\" with error: " + err.Error())
 			}
 
 			return
@@ -80,6 +101,7 @@ func (c *HelpCommand) Exec() error {
 }
 
 type MigratePrevCommand struct {
+	handler *MigrationsHandler
 }
 
 func (c *MigratePrevCommand) Name() string {
@@ -91,10 +113,19 @@ func (c *MigratePrevCommand) Description() string {
 }
 
 func (c *MigratePrevCommand) Exec() error {
-	return nil
+	hmig, err := c.handler.MigratePrev()
+
+	fmt.Printf("Executed 1 migration\n")
+
+	if hmig.Execution != nil {
+		fmt.Printf("Executed Down() for %d migration\n", hmig.Execution.Version)
+	}
+
+	return err
 }
 
 type MigrateNextCommand struct {
+	handler *MigrationsHandler
 }
 
 func (c *MigrateNextCommand) Name() string {
@@ -106,7 +137,15 @@ func (c *MigrateNextCommand) Description() string {
 }
 
 func (c *MigrateNextCommand) Exec() error {
-	return nil
+	hmig, err := c.handler.MigrateNext()
+
+	fmt.Printf("Executed 1 migration\n")
+
+	if hmig.Execution != nil {
+		fmt.Printf("Executed Up() for %d migration\n", hmig.Execution.Version)
+	}
+
+	return err
 }
 
 type MigrateUpCommand struct {
@@ -122,18 +161,14 @@ func (c *MigrateUpCommand) Description() string {
 }
 
 func (c *MigrateUpCommand) Exec() error {
-	mig, err := c.handler.MigrateAllUp()
+	mig, err := c.handler.MigrateUp()
 
 	fmt.Printf("Executed %d migrations\n", len(mig))
 
 	for _, hmig := range mig {
-		success := "success"
-
-		if !hmig.Execution.Finished() {
-			success = "failed"
+		if hmig.Execution != nil {
+			fmt.Printf("Executed Up() for %d migration\n", hmig.Execution.Version)
 		}
-
-		fmt.Printf("Executed Up() for %d migration - %s\n", hmig.Execution.Version, success)
 	}
 
 	return err
@@ -152,18 +187,23 @@ func (c *MigrateDownCommand) Description() string {
 }
 
 func (c *MigrateDownCommand) Exec() error {
-	mig, err := c.handler.MigrateAllDown()
+	mig, err := c.handler.MigrateDown()
 
 	fmt.Printf("Executed %d migrations\n", len(mig))
 
 	for _, hmig := range mig {
-		fmt.Printf("Executed Down() for %d migration\n", hmig.Execution.Version)
+		if hmig.Execution != nil {
+			fmt.Printf("Executed Down() for %d migration\n", hmig.Execution.Version)
+		}
+
 	}
 
 	return err
 }
 
 type MigrateStatsCommand struct {
+	registry   migration.MigrationsRegistry
+	repository execution.Repository
 }
 
 func (c *MigrateStatsCommand) Name() string {
@@ -175,5 +215,55 @@ func (c *MigrateStatsCommand) Description() string {
 }
 
 func (c *MigrateStatsCommand) Exec() error {
+	plan, err := NewExecutionPlan(c.registry, c.repository)
+
+	if plan != nil {
+		nextMigFile := "-"
+		prevMigFile := "-"
+		next := plan.Next()
+		prev := plan.Prev()
+
+		if next != nil {
+			nextMigFile = migration.FileNamePrefix + migration.FileNameSeparator +
+				strconv.Itoa(int(next.Version())) + ".go"
+		}
+		if prev != nil {
+			prevMigFile = migration.FileNamePrefix + migration.FileNameSeparator +
+				strconv.Itoa(int(prev.Version())) + ".go"
+		}
+
+		fmt.Println("")
+		fmt.Printf("Registered migrations count: %d\n", plan.RegisteredMigrationsCount())
+		fmt.Printf("Executions count: %d\n", plan.ExecutionsCount())
+		fmt.Printf("Next migration file: %s\n", nextMigFile)
+		fmt.Printf("Prev migration file: %s\n", prevMigFile)
+	}
+
+	return err
+}
+
+type GenerateBlankMigrationCommand struct {
+	migrationsDir migration.MigrationsDirPath
+}
+
+func (c *GenerateBlankMigrationCommand) Name() string {
+	return "blank"
+}
+
+func (c *GenerateBlankMigrationCommand) Description() string {
+	return "Generates a new, blank migrations file in the configured migrations directory"
+}
+
+func (c *GenerateBlankMigrationCommand) Exec() error {
+	fileName, err := migration.GenerateBlankMigration(c.migrationsDir)
+
+	if err != nil {
+		return err
+	}
+
+	fmt.Println("")
+	fmt.Println("New blank migration file generated: " + fileName)
+	fmt.Println("")
+
 	return nil
 }
