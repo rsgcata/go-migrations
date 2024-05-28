@@ -28,8 +28,6 @@ func (execution MigrationExecution) Finished() bool {
 
 type Repository interface {
 	Init() error
-	Lock() error
-	Unlock() error
 	LoadExecutions() ([]MigrationExecution, error)
 	Save(execution MigrationExecution) error
 	Remove(execution MigrationExecution) error

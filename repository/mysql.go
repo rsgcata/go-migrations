@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 
+	_ "github.com/go-sql-driver/mysql"
 	"github.com/rsgcata/go-migrations/execution"
 )
 
@@ -13,7 +14,23 @@ type MysqlHandler struct {
 	ctx       context.Context
 }
 
-func NewMysqlHandler(db *sql.DB, tableName string, ctx context.Context) *MysqlHandler {
+func NewDbHandle(dsn string) (*sql.DB, error) {
+	db, err := sql.Open("mysql", dsn)
+	db.SetMaxIdleConns(1)
+	db.SetMaxOpenConns(1)
+	db.SetConnMaxIdleTime(0)
+	db.SetConnMaxLifetime(0)
+	return db, err
+}
+
+// db should be a standalone, dedicated connection object. It should not be used by migrations.
+// Using db for executions repository and migrations may cause unexpected behaviour when database
+// locks are involved
+func NewMysqlHandler(
+	db *sql.DB,
+	tableName string,
+	ctx context.Context,
+) *MysqlHandler {
 	return &MysqlHandler{db, tableName, ctx}
 }
 
@@ -31,20 +48,6 @@ func (h *MysqlHandler) Init() error {
 			"PRIMARY KEY (`version`)"+
 			") ENGINE=InnoDB CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci",
 	)
-	return err
-}
-
-// This will not work properly in some distributed setups like Galera Cluster
-// https://mariadb.com/kb/en/mariadb-galera-cluster-known-limitations/
-func (h *MysqlHandler) Lock() error {
-	_, err := h.db.ExecContext(h.ctx, "LOCK TABLES `"+h.tableName+"` WRITE")
-	return err
-}
-
-// This will not work properly in some distributed setups like Galera Cluster
-// https://mariadb.com/kb/en/mariadb-galera-cluster-known-limitations/
-func (h *MysqlHandler) Unlock() error {
-	_, err := h.db.ExecContext(h.ctx, "UNLOCK TABLES")
 	return err
 }
 
@@ -80,7 +83,7 @@ func (h *MysqlHandler) Save(execution execution.MigrationExecution) error {
 }
 
 func (h *MysqlHandler) Remove(execution execution.MigrationExecution) error {
-	_, err := h.db.QueryContext(
+	_, err := h.db.ExecContext(
 		h.ctx,
 		"DELETE FROM `"+h.tableName+"` WHERE `version` = ?",
 		execution.Version,

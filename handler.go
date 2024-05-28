@@ -145,16 +145,7 @@ func (handler *MigrationsHandler) MigrateNext() (HandledMigration, error) {
 		return HandledMigration{nil, nil}, nil
 	}
 
-	err := handler.repository.Lock()
 	errMsg := "failed to migrate up"
-
-	if err != nil {
-		return HandledMigration{nil, nil}, fmt.Errorf(
-			"%s, failed to lock repository with error: %w", errMsg, err,
-		)
-	}
-
-	defer handler.repository.Unlock()
 
 	plan, err := NewExecutionPlan(handler.registry, handler.repository)
 	if err != nil {
@@ -184,16 +175,7 @@ func (handler *MigrationsHandler) MigrateUp() ([]HandledMigration, error) {
 		return []HandledMigration{}, nil
 	}
 
-	err := handler.repository.Lock()
 	errMsg := "failed to migrate all up"
-
-	if err != nil {
-		return []HandledMigration{}, fmt.Errorf(
-			"%s, failed to lock repository with error: %w", errMsg, err,
-		)
-	}
-
-	defer handler.repository.Unlock()
 
 	plan, err := NewExecutionPlan(handler.registry, handler.repository)
 	if err != nil {
@@ -230,16 +212,7 @@ func (handler *MigrationsHandler) MigratePrev() (HandledMigration, error) {
 		return HandledMigration{nil, nil}, nil
 	}
 
-	err := handler.repository.Lock()
 	errMsg := "failed to migrate down"
-
-	if err != nil {
-		return HandledMigration{nil, nil}, fmt.Errorf(
-			"%s, failed to lock repository with error: %w", errMsg, err,
-		)
-	}
-
-	defer handler.repository.Unlock()
 
 	plan, err := NewExecutionPlan(handler.registry, handler.repository)
 	if err != nil {
@@ -269,16 +242,7 @@ func (handler *MigrationsHandler) MigrateDown() ([]HandledMigration, error) {
 		return []HandledMigration{}, nil
 	}
 
-	err := handler.repository.Lock()
 	errMsg := "failed to migrate all down"
-
-	if err != nil {
-		return []HandledMigration{}, fmt.Errorf(
-			"%s, failed to lock repository with error: %w", errMsg, err,
-		)
-	}
-
-	defer handler.repository.Unlock()
 
 	plan, err := NewExecutionPlan(handler.registry, handler.repository)
 	if err != nil {

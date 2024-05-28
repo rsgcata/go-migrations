@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
 
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/rsgcata/go-migrations/migration"
@@ -23,20 +22,24 @@ func main() {
 	)
 
 	if err != nil {
-		fmt.Println("Invalid migrations path", err)
-		os.Exit(1)
+		panic(fmt.Errorf("invalid migrations path: %w", err))
 	}
 
-	db := newDb()
+	dbDsn := getDbDsn()
+	repoDb, err := repository.NewDbHandle(dbDsn)
+
+	if err != nil {
+		panic(fmt.Errorf("failed to build executions repository db: %w", err))
+	}
 
 	migRegistry := migration.NewDirMigrationsRegistry(dirPath)
-	populateRegistry(migRegistry, ctx)
-	repo := repository.NewMysqlHandler(db, "migration_executions", context.Background())
+	populateRegistry(migRegistry, ctx, dbDsn)
+	repo := repository.NewMysqlHandler(repoDb, "migration_executions", context.Background())
 
 	Bootstrap(os.Args[1:], migRegistry, repo, dirPath)
 }
 
-func newDb() *sql.DB {
+func getDbDsn() string {
 	dbName := os.Getenv("MYSQL_DATABASE")
 	dsn := os.Getenv("MYSQL_DSN")
 
@@ -45,39 +48,25 @@ func newDb() *sql.DB {
 	}
 
 	if dsn == "" {
-		// Needed if ran from host machine
+		// Needed if ran from host machine because we are missing the env variables
+		// See pass and port in .env file
 		dsn = "root:123456789@tcp(localhost:3306)/" + dbName
 	}
 
-	// DB creation should run only once. This is added only for dev purpose
-	db, _ := sql.Open("mysql", strings.TrimRight(dsn, dbName))
-	db.Query("CREATE DATABASE IF NOT EXISTS " + dbName)
-	db.Close()
-
-	db, err := sql.Open("mysql", dsn)
-
-	// Adjust this as needed, depending how much the migrations will last
-	// Max open connections in some scenarios should be 1 because of repository lock/unlock
-	// behaviour
-	// db.SetMaxOpenConns(1)
-	// db.SetMaxIdleConns(1)
-	// db.SetConnMaxIdleTime(time.Hour)
-	// db.SetConnMaxLifetime(time.Hour)
-
-	if err != nil {
-		panic(err)
-	}
-
-	return db
+	return dsn
 }
 
 func populateRegistry(
 	migRegistry *migration.DirMigrationsRegistry,
 	ctx context.Context,
+	dbDsn string,
 ) {
-	// New db needed to overcome the lock tables limitation where a session
-	// needs to specify all tables it reads from when using LOCK TABLES
-	db := newDb()
+	// New db needed to not conflict with executions repository connections
+	db, err := sql.Open("mysql", dbDsn)
+
+	if err != nil {
+		panic(fmt.Errorf("failed to build migrations db: %w", err))
+	}
 
 	migRegistry.Register(&tmp.Migration1712953077{Db: db})
 	migRegistry.Register(&tmp.Migration1712953080{Db: db})
