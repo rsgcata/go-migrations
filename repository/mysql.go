@@ -90,3 +90,26 @@ func (h *MysqlHandler) Remove(execution execution.MigrationExecution) error {
 	)
 	return err
 }
+
+func (h *MysqlHandler) FindOne(version uint64) (*execution.MigrationExecution, error) {
+	row := h.db.QueryRowContext(
+		h.ctx,
+		"SELECT SQL_NO_CACHE * FROM "+"`"+h.tableName+"` WHERE `version` = ?",
+		version,
+	)
+
+	if row == nil {
+		return nil, nil
+	}
+
+	var execution execution.MigrationExecution
+	err := row.Scan(&execution.Version, &execution.ExecutedAtMs, &execution.FinishedAtMs)
+
+	if err == sql.ErrNoRows {
+		return nil, nil
+	} else if err != nil {
+		return nil, err
+	}
+
+	return &execution, row.Err()
+}

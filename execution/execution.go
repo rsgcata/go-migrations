@@ -31,4 +31,5 @@ type Repository interface {
 	LoadExecutions() ([]MigrationExecution, error)
 	Save(execution MigrationExecution) error
 	Remove(execution MigrationExecution) error
+	FindOne(version uint64) (*MigrationExecution, error)
 }

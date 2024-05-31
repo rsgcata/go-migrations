@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"testing"
 	"time"
 
@@ -11,24 +10,14 @@ import (
 )
 
 type RepoMock struct {
-	locked         bool
 	init           func() error
-	lock           func() error
-	unlock         func() error
 	loadExecutions func() ([]execution.MigrationExecution, error)
 	save           func(execution execution.MigrationExecution) error
 	remove         func(execution execution.MigrationExecution) error
+	findOne        func(version uint64) (*execution.MigrationExecution, error)
 }
 
 func (rm *RepoMock) Init() error { return rm.init() }
-func (rm *RepoMock) Lock() error {
-	rm.locked = true
-	return rm.lock()
-}
-func (rm *RepoMock) Unlock() error {
-	rm.locked = false
-	return rm.unlock()
-}
 func (rm *RepoMock) LoadExecutions() ([]execution.MigrationExecution, error) {
 	return rm.loadExecutions()
 }
@@ -38,6 +27,9 @@ func (rm *RepoMock) Save(execution execution.MigrationExecution) error {
 func (rm *RepoMock) Remove(execution execution.MigrationExecution) error {
 	return rm.remove(execution)
 }
+func (rm *RepoMock) FindOne(version uint64) (*execution.MigrationExecution, error) {
+	return rm.findOne(version)
+}
 
 type HandlerTestSuite struct {
 	suite.Suite
@@ -45,36 +37,6 @@ type HandlerTestSuite struct {
 
 func TestHandlerTestSuite(t *testing.T) {
 	suite.Run(t, new(HandlerTestSuite))
-}
-
-var exclusiveStateChangesPanicMsg string = `concurent migration execution handling 
-without exclusive lock, rights must not persist any exectuion state`
-
-func (suite *HandlerTestSuite) TestItDoesNotAllowConcurrentMigrateRuns() {
-	expectedErr := errors.New("locked error")
-	repo := &RepoMock{
-		lock:   func() error { return expectedErr },
-		save:   func(execution.MigrationExecution) error { panic(exclusiveStateChangesPanicMsg) },
-		remove: func(execution.MigrationExecution) error { panic(exclusiveStateChangesPanicMsg) },
-	}
-	registry := migration.NewGenericRegistry()
-	registry.Register(migration.NewDummyMigration(1))
-	handler, _ := NewHandler(registry, repo)
-
-	assertRunLocked := func(handledMigration HandledMigration, actualErr error) {
-		suite.Assert().ErrorIs(actualErr, expectedErr)
-		suite.Assert().Nil(handledMigration.Migration)
-		suite.Assert().Nil(handledMigration.Execution)
-	}
-	assertAllRunsLocked := func(handledMigrations []HandledMigration, actualErr error) {
-		suite.Assert().ErrorIs(actualErr, expectedErr)
-		suite.Assert().Len(handledMigrations, 0)
-	}
-
-	assertRunLocked(handler.MigrateNext())
-	assertRunLocked(handler.MigratePrev())
-	assertAllRunsLocked(handler.MigrateUp())
-	assertAllRunsLocked(handler.MigrateDown())
 }
 
 func (suite *HandlerTestSuite) TestItCanCreateExecutionPlan() {
@@ -348,10 +310,7 @@ func (suite *HandlerTestSuite) TestItCanMigrateUpTheProperNextAvailableMigration
 	}
 
 	for name, scenario := range scenarios {
-		var repoMock *RepoMock
-		repoMock = &RepoMock{
-			lock:   func() error { return nil },
-			unlock: func() error { return nil },
+		repoMock := &RepoMock{
 			loadExecutions: func() ([]execution.MigrationExecution, error) {
 				return scenario.initialExecutions, nil
 			},
@@ -360,7 +319,6 @@ func (suite *HandlerTestSuite) TestItCanMigrateUpTheProperNextAvailableMigration
 					scenario.expectedExecution.Version, execution.Version,
 					"failed scenario: %s", name,
 				)
-				suite.Assert().True(repoMock.locked)
 				return nil
 			},
 		}
@@ -399,7 +357,5 @@ func (suite *HandlerTestSuite) TestItCanMigrateUpTheProperNextAvailableMigration
 				"failed scenario: %s", name,
 			)
 		}
-
-		suite.Assert().False(repoMock.locked)
 	}
 }

@@ -162,7 +162,8 @@ func (handler *MigrationsHandler) MigrateNext() (HandledMigration, error) {
 
 	exec := execution.StartExecution(migrationToExec)
 
-	if err = migrationToExec.Up(); err == nil {
+	err = migrationToExec.Up()
+	if err == nil {
 		exec.FinishExecution()
 	}
 
@@ -272,4 +273,68 @@ func (handler *MigrationsHandler) MigrateDown() ([]HandledMigration, error) {
 	}
 
 	return handledMigrations, err
+}
+
+func (handler *MigrationsHandler) ForceUp(version uint64) (HandledMigration, error) {
+	if handler.registry.Count() == 0 {
+		return HandledMigration{nil, nil}, nil
+	}
+
+	migrationToExec := handler.registry.Get(version)
+	if migrationToExec == nil {
+		return HandledMigration{nil, nil}, nil
+	}
+
+	exec := execution.StartExecution(migrationToExec)
+
+	err := migrationToExec.Up()
+	if err == nil {
+		exec.FinishExecution()
+	}
+
+	errSave := handler.repository.Save(*exec)
+
+	if err == nil {
+		err = errSave
+	} else if errSave != nil {
+		err = fmt.Errorf("%w, %w", err, errSave)
+	}
+
+	return HandledMigration{migrationToExec, exec}, err
+}
+
+func (handler *MigrationsHandler) ForceDown(version uint64) (HandledMigration, error) {
+	if handler.registry.Count() == 0 {
+		return HandledMigration{nil, nil}, nil
+	}
+
+	errMsg := "failed to migrate down forcefully"
+
+	migrationToExec := handler.registry.Get(version)
+	if migrationToExec == nil {
+		return HandledMigration{nil, nil}, nil
+	}
+
+	exec, err := handler.repository.FindOne(version)
+	if err != nil {
+		return HandledMigration{migrationToExec, nil}, fmt.Errorf(
+			"%s, failed to load execution with error: %w", errMsg, err,
+		)
+	}
+
+	if exec == nil {
+		return HandledMigration{migrationToExec, nil}, fmt.Errorf(
+			"%s, execution not found. Maybe the migration was never executed?", errMsg,
+		)
+	}
+
+	if err := migrationToExec.Down(); err != nil {
+		return HandledMigration{migrationToExec, nil}, fmt.Errorf(
+			"%s, down() failed with error: %w", errMsg, err,
+		)
+	}
+
+	handler.repository.Remove(*exec)
+
+	return HandledMigration{migrationToExec, exec}, err
 }

@@ -1,8 +1,10 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
+	"sort"
 	"strconv"
 	"text/tabwriter"
 
@@ -32,12 +34,24 @@ func Bootstrap(
 		)
 	}
 
+	inputCmd := "help"
+
+	if len(args) > 1 {
+		if args[0] == "--" {
+			args = args[1:]
+		}
+
+		inputCmd = args[0]
+	}
+
 	availableCommands := make(map[string]Command)
 
 	prev := &MigratePrevCommand{handler: handler}
 	next := &MigrateNextCommand{handler: handler}
 	up := &MigrateUpCommand{handler: handler}
 	down := &MigrateDownCommand{handler: handler}
+	forceUp := &MigrateForceUpCommand{handler: handler, args: args}
+	forceDown := &MigrateForceDownCommand{handler: handler, args: args}
 	stats := &MigrateStatsCommand{registry: registry, repository: repository}
 	blank := &GenerateBlankMigrationCommand{dirPath}
 	availableCommands[prev.Name()] = prev
@@ -46,14 +60,10 @@ func Bootstrap(
 	availableCommands[down.Name()] = down
 	availableCommands[stats.Name()] = stats
 	availableCommands[blank.Name()] = blank
+	availableCommands[forceUp.Name()] = forceUp
+	availableCommands[forceDown.Name()] = forceDown
 
 	help := &HelpCommand{availableCommands: availableCommands}
-
-	inputCmd := "help"
-
-	if len(args) > 1 {
-		inputCmd = args[1]
-	}
 
 	for _, cmd := range availableCommands {
 		if inputCmd == cmd.Name() {
@@ -92,8 +102,18 @@ func (c *HelpCommand) Exec() error {
 
 	wirter := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
 	fmt.Fprintln(wirter, c.Name()+"\tDisplays helpful information about this tool")
-	for _, ac := range c.availableCommands {
-		fmt.Fprintln(wirter, ac.Name()+"\t"+ac.Description())
+
+	var names []string
+
+	for key := range c.availableCommands {
+		names = append(names, key)
+	}
+	sort.Strings(names)
+
+	for _, name := range names {
+		fmt.Fprintln(
+			wirter, c.availableCommands[name].Name()+"\t"+c.availableCommands[name].Description(),
+		)
 	}
 	wirter.Flush()
 
@@ -115,10 +135,10 @@ func (c *MigratePrevCommand) Description() string {
 func (c *MigratePrevCommand) Exec() error {
 	hmig, err := c.handler.MigratePrev()
 
-	fmt.Printf("Executed 1 migration\n")
-
 	if hmig.Execution != nil {
 		fmt.Printf("Executed Down() for %d migration\n", hmig.Execution.Version)
+	} else {
+		fmt.Print("No migration executed\n")
 	}
 
 	return err
@@ -139,10 +159,10 @@ func (c *MigrateNextCommand) Description() string {
 func (c *MigrateNextCommand) Exec() error {
 	hmig, err := c.handler.MigrateNext()
 
-	fmt.Printf("Executed 1 migration\n")
-
-	if hmig.Execution != nil {
-		fmt.Printf("Executed Up() for %d migration\n", hmig.Execution.Version)
+	if hmig.Migration != nil {
+		fmt.Printf("Executed Up() for %d migration\n", hmig.Migration.Version())
+	} else {
+		fmt.Print("No migration executed\n")
 	}
 
 	return err
@@ -266,4 +286,84 @@ func (c *GenerateBlankMigrationCommand) Exec() error {
 	fmt.Println("")
 
 	return nil
+}
+
+func getVersionFrom(args []string) (uint64, error) {
+	if len(args) < 2 {
+		return 0, errors.New(
+			"migration version is expected to be the second argument. None provided",
+		)
+	}
+
+	migVersion, err := strconv.Atoi(args[1])
+
+	if err != nil {
+		return 0, fmt.Errorf(
+			"migration version must be a valid numeric value. Failed with error: %w", err,
+		)
+	}
+
+	return uint64(migVersion), nil
+}
+
+type MigrateForceUpCommand struct {
+	handler *MigrationsHandler
+	args    []string
+}
+
+func (c *MigrateForceUpCommand) Name() string {
+	return "forceup"
+}
+
+func (c *MigrateForceUpCommand) Description() string {
+	return "Executes Up() forcefully for the provided migration version"
+}
+
+func (c *MigrateForceUpCommand) Exec() error {
+	migVersion, err := getVersionFrom(c.args)
+
+	if err != nil {
+		return err
+	}
+
+	hmig, err := c.handler.ForceUp(migVersion)
+
+	if hmig.Execution != nil {
+		fmt.Printf("Executed Up() forcefully for %d migration\n", hmig.Execution.Version)
+	} else {
+		fmt.Print("No migration executed\n")
+	}
+
+	return err
+}
+
+type MigrateForceDownCommand struct {
+	handler *MigrationsHandler
+	args    []string
+}
+
+func (c *MigrateForceDownCommand) Name() string {
+	return "forcedown"
+}
+
+func (c *MigrateForceDownCommand) Description() string {
+	return "Executes Down() forcefully for the provided migration version"
+}
+
+func (c *MigrateForceDownCommand) Exec() error {
+	migVersion, err := getVersionFrom(c.args)
+
+	if err != nil {
+		return err
+	}
+
+	hmig, err := c.handler.ForceDown(migVersion)
+
+	if hmig.Execution != nil {
+		fmt.Printf("Executed Down() forcefully for %d migration\n", hmig.Execution.Version)
+	} else {
+		fmt.Print("No migration executed\n")
+	}
+
+	return err
 }
