@@ -10,18 +10,37 @@ import (
 	"strings"
 )
 
+// MigrationsRegistry allows implementations to manage a collection of migration files.
+// Implementations should act as a single source for all created migrations.
 type MigrationsRegistry interface {
+	// Register must push a migration in the registry. It should fail with error if the
+	// migration can't be registered, for example, it its version overlaps with an
+	// already registered migration
 	Register(migration Migration) error
+
+	// OrderedVersions must return a list of all registered migration versions,
+	// ordered in ascending order. Can be used to determine the order in which the migrations
+	// should run.
 	OrderedVersions() []uint64
+
+	// OrderedMigrations must return a list of all registered migrations,
+	// ordered in ascending order by using their version. Can be used to determine the
+	// order in which the migrations should run.
 	OrderedMigrations() []Migration
+
+	// Get must find and return the migration from the registry, by using its version.
 	Get(version uint64) Migration
+
+	// Count must return the total number of registered migrations.
 	Count() int
 }
 
+// GenericRegistry is a generic implementation for MigrationsRegistry
 type GenericRegistry struct {
 	migrations map[uint64]Migration
 }
 
+// NewGenericRegistry creates a new, empty registry
 func NewGenericRegistry() *GenericRegistry {
 	return &GenericRegistry{make(map[uint64]Migration)}
 }
@@ -52,10 +71,12 @@ func (registry *GenericRegistry) OrderedMigrations() []Migration {
 		orderedMigrations = append(orderedMigrations, mig)
 	}
 
-	sort.Slice(orderedMigrations, func(i, j int) bool {
-		return orderedMigrations[i].Version() < orderedMigrations[j].Version()
-	})
-	
+	sort.Slice(
+		orderedMigrations, func(i, j int) bool {
+			return orderedMigrations[i].Version() < orderedMigrations[j].Version()
+		},
+	)
+
 	return orderedMigrations
 }
 
@@ -70,17 +91,23 @@ func (registry *GenericRegistry) Count() int {
 	return len(registry.migrations)
 }
 
+// DirMigrationsRegistry is an implementation of MigrationsRegistry. It will include
+// all migrations available in the specified directory (see struct builder function, there
+// you can specify the used directory).
 type DirMigrationsRegistry struct {
 	GenericRegistry
 	dirPath MigrationsDirPath
 }
 
+// NewDirMigrationsRegistry builds a migrations registry with all migrations available
+// in the specified directory.
 func NewDirMigrationsRegistry(dirPath MigrationsDirPath) *DirMigrationsRegistry {
 	return &DirMigrationsRegistry{*NewGenericRegistry(), dirPath}
 }
 
-// Checks if everything from the migrations directory has been registered in the registry.
-// If it returns false, next 2 return values show which file nanes are missing and which
+// HasAllMigrationsRegistered checks if everything from the migrations directory has been
+// registered in the registry.
+// If it returns false, next 2 return values show which file names are missing and which
 // file names are extra, compare to the registered migrations.
 // Errors if reading the directory fails (maybe insufficient permissions?)
 func (registry *DirMigrationsRegistry) HasAllMigrationsRegistered() (
