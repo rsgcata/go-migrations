@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -17,8 +18,16 @@ type RepoMock struct {
 	findOne        func(version uint64) (*execution.MigrationExecution, error)
 }
 
-func (rm *RepoMock) Init() error { return rm.init() }
+func (rm *RepoMock) Init() error {
+	if rm.init == nil {
+		return nil
+	}
+	return rm.init()
+}
 func (rm *RepoMock) LoadExecutions() ([]execution.MigrationExecution, error) {
+	if rm.loadExecutions == nil {
+		return make([]execution.MigrationExecution, 0), nil
+	}
 	return rm.loadExecutions()
 }
 func (rm *RepoMock) Save(execution execution.MigrationExecution) error {
@@ -50,8 +59,8 @@ func (suite *HandlerTestSuite) TestItCanCreateExecutionPlan() {
 	}
 
 	registry := migration.NewGenericRegistry()
-	registry.Register(migration.NewDummyMigration(1))
-	registry.Register(migration.NewDummyMigration(2))
+	_ = registry.Register(migration.NewDummyMigration(1))
+	_ = registry.Register(migration.NewDummyMigration(2))
 
 	plan, err := NewExecutionPlan(registry, repo)
 
@@ -59,7 +68,7 @@ func (suite *HandlerTestSuite) TestItCanCreateExecutionPlan() {
 	suite.Assert().NotNil(plan)
 }
 
-func (suite *HandlerTestSuite) TestItFailsToCreateExecutionPlanFromInvalidExecutionPath() {
+func (suite *HandlerTestSuite) TestItFailsToCreateExecutionPlanFromInvalidState() {
 	scenarios := map[string]struct {
 		persistedExecutions  []execution.MigrationExecution
 		registeredMigrations []migration.Migration
@@ -106,7 +115,7 @@ func (suite *HandlerTestSuite) TestItFailsToCreateExecutionPlanFromInvalidExecut
 
 		registry := migration.NewGenericRegistry()
 		for _, mig := range scenarioData.registeredMigrations {
-			registry.Register(mig)
+			_ = registry.Register(mig)
 		}
 
 		plan, err := NewExecutionPlan(registry, repo)
@@ -114,6 +123,21 @@ func (suite *HandlerTestSuite) TestItFailsToCreateExecutionPlanFromInvalidExecut
 		suite.Assert().Nil(plan, "Failed scenario: %s", scenarioName)
 		suite.Assert().NotNil(err, "Failed scenario: %s", scenarioName)
 	}
+}
+
+func (suite *HandlerTestSuite) TestItFailsToCreateExecutionsPlanWhenLoadingFromRepoFails() {
+	loadErr := errors.New("load err")
+	repo := &RepoMock{
+		loadExecutions: func() ([]execution.MigrationExecution, error) {
+			return make([]execution.MigrationExecution, 0), loadErr
+		},
+	}
+	registry := migration.NewGenericRegistry()
+	_ = registry.Register(migration.NewDummyMigration(123))
+	plan, err := NewExecutionPlan(registry, repo)
+
+	suite.Assert().Nil(plan)
+	suite.Assert().ErrorContains(err, loadErr.Error())
 }
 
 func (suite *HandlerTestSuite) TestItCanGetNextMigrationFromExecutionPlan() {
@@ -170,7 +194,7 @@ func (suite *HandlerTestSuite) TestItCanGetNextMigrationFromExecutionPlan() {
 
 		registry := migration.NewGenericRegistry()
 		for _, mig := range scenarioData.registeredMigrations {
-			registry.Register(mig)
+			_ = registry.Register(mig)
 		}
 
 		plan, _ := NewExecutionPlan(registry, repo)
@@ -218,7 +242,7 @@ func (suite *HandlerTestSuite) TestItCanGetPreviousMigrationFromExecutionPlan() 
 
 		registry := migration.NewGenericRegistry()
 		for _, mig := range scenarioData.registeredMigrations {
-			registry.Register(mig)
+			_ = registry.Register(mig)
 		}
 
 		plan, _ := NewExecutionPlan(registry, repo)
@@ -228,6 +252,40 @@ func (suite *HandlerTestSuite) TestItCanGetPreviousMigrationFromExecutionPlan() 
 			scenarioData.expectedMigration, prevMig, "Failed scenario: %s", scenarioName,
 		)
 	}
+}
+
+func (suite *HandlerTestSuite) TestItCanCountMigrationsAndExecutionsFromPlan() {
+	registry := migration.NewGenericRegistry()
+	_ = registry.Register(migration.NewDummyMigration(1))
+	_ = registry.Register(migration.NewDummyMigration(2))
+	_ = registry.Register(migration.NewDummyMigration(3))
+
+	plan, _ := NewExecutionPlan(
+		registry, &RepoMock{
+			loadExecutions: func() ([]execution.MigrationExecution, error) {
+				return []execution.MigrationExecution{
+					{Version: 1, ExecutedAtMs: 2, FinishedAtMs: 3},
+					{Version: 2, ExecutedAtMs: 4, FinishedAtMs: 5},
+				}, nil
+			},
+		},
+	)
+	suite.Assert().Equal(plan.RegisteredMigrationsCount(), 3)
+	suite.Assert().Equal(plan.ExecutionsCount(), 2)
+}
+
+func (suite *HandlerTestSuite) TestItFailsToBuildHandlerWhenRepoInitializationFails() {
+	errMsg := "init failed"
+	handler, err := NewHandler(
+		migration.NewGenericRegistry(), &RepoMock{
+			init: func() error {
+				return errors.New(errMsg)
+			},
+		},
+	)
+	suite.Assert().Nil(handler)
+	suite.Assert().NotNil(err)
+	suite.Assert().Contains(err.Error(), errMsg)
 }
 
 func (suite *HandlerTestSuite) TestItCanMigrateUpTheProperNextAvailableMigration() {
@@ -304,7 +362,7 @@ func (suite *HandlerTestSuite) TestItCanMigrateUpTheProperNextAvailableMigration
 	buildRegistry := func(migrations []migration.Migration) *migration.GenericRegistry {
 		registry := migration.NewGenericRegistry()
 		for _, mig := range migrations {
-			registry.Register(mig)
+			_ = registry.Register(mig)
 		}
 		return registry
 	}
@@ -358,4 +416,23 @@ func (suite *HandlerTestSuite) TestItCanMigrateUpTheProperNextAvailableMigration
 			)
 		}
 	}
+}
+
+func (suite *HandlerTestSuite) TestItFailsToMigrateNextWithMissingExecutionPlan() {
+	errMsg := "init failed"
+	registry := migration.NewGenericRegistry()
+	_ = registry.Register(migration.NewDummyMigration(1))
+	handler, _ := NewHandler(
+		registry, &RepoMock{
+			loadExecutions: func() ([]execution.MigrationExecution, error) {
+				return nil, errors.New(errMsg)
+			},
+		},
+	)
+	handledMigration, err := handler.MigrateNext()
+	suite.Assert().NotNil(handledMigration)
+	suite.Assert().NotNil(err)
+	suite.Assert().Nil(handledMigration.Execution)
+	suite.Assert().Nil(handledMigration.Migration)
+	suite.Assert().Contains(err.Error(), errMsg)
 }

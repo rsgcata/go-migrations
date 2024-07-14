@@ -10,6 +10,7 @@ import (
 
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/rsgcata/go-migrations/execution"
+	"github.com/rsgcata/go-migrations/migration"
 	"github.com/stretchr/testify/suite"
 )
 
@@ -44,42 +45,60 @@ func (suite *MysqlTestSuite) SetupSuite() {
 	}
 
 	tmpDb, _ := sql.Open("mysql", strings.TrimRight(suite.dsn, suite.dbName))
-	tmpDb.Exec("DROP DATABASE IF EXISTS " + suite.dbName)
-	tmpDb.Exec("CREATE DATABASE " + suite.dbName)
-	tmpDb.Close()
+	_, _ = tmpDb.Exec("DROP DATABASE IF EXISTS " + suite.dbName)
+	_, _ = tmpDb.Exec("CREATE DATABASE " + suite.dbName)
+	_ = tmpDb.Close()
 
 	suite.db, _ = sql.Open("mysql", suite.dsn)
 	suite.handler = &MysqlHandler{suite.db, ExecutionsTable, context.Background()}
 }
 
 func (suite *MysqlTestSuite) TearDownSuite() {
-	suite.db.Exec("DROP DATABASE IF EXISTS " + suite.dbName)
-	suite.db.Close()
+	_, _ = suite.db.Exec("DROP DATABASE IF EXISTS " + suite.dbName)
+	_ = suite.db.Close()
 }
 
 func (suite *MysqlTestSuite) SetupTest() {
-	suite.handler.Init()
-	suite.db.Exec("DELETE FROM " + ExecutionsTable)
+	_ = suite.handler.Init()
+	_, _ = suite.db.Exec("DELETE FROM " + ExecutionsTable)
 }
 
 func (suite *MysqlTestSuite) TearDownTest() {
-	suite.db.Exec("DELETE FROM " + ExecutionsTable)
+	_, _ = suite.db.Exec("DELETE FROM " + ExecutionsTable)
+}
+
+func (suite *MysqlTestSuite) TestItCanBuildMigrationsExclusiveDbHandle() {
+	handle, err := NewDbHandle(suite.dsn)
+
+	suite.Assert().Nil(err)
+	suite.Assert().Equal(1, handle.Stats().MaxOpenConnections)
+
+	var dbName string
+	_ = handle.QueryRow("select database()").Scan(&dbName)
+	suite.Assert().Equal(suite.dbName, dbName)
+}
+
+func (suite *MysqlTestSuite) TestItCanBuildHandlerWithProvidedContext() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	handler := NewMysqlHandler(suite.db, "migration_execs", ctx)
+	suite.Assert().Same(ctx, handler.Context())
 }
 
 func (suite *MysqlTestSuite) TestItCanInitializeExecutionsTable() {
-	suite.db.Exec("DROP TABLE IF EXISTS " + ExecutionsTable)
+	_, _ = suite.db.Exec("DROP TABLE IF EXISTS " + ExecutionsTable)
 	tableExists := func() bool {
 		var table string
-		suite.db.QueryRow("SHOW TABLES LIKE '" + ExecutionsTable + "'").Scan(&table)
+		_ = suite.db.QueryRow("SHOW TABLES LIKE '" + ExecutionsTable + "'").Scan(&table)
 		return table == ExecutionsTable
 	}
 
 	suite.Assert().False(tableExists())
-	suite.handler.Init()
+	_ = suite.handler.Init()
 	suite.Assert().True(tableExists())
 }
 
-func executionsPorvider() map[uint64]execution.MigrationExecution {
+func executionsProvider() map[uint64]execution.MigrationExecution {
 	return map[uint64]execution.MigrationExecution{
 		uint64(1): {Version: 1, ExecutedAtMs: 2, FinishedAtMs: 3},
 		uint64(4): {Version: 4, ExecutedAtMs: 5, FinishedAtMs: 6},
@@ -88,10 +107,10 @@ func executionsPorvider() map[uint64]execution.MigrationExecution {
 }
 
 func (suite *MysqlTestSuite) TestItCanLoadExecutions() {
-	executions := executionsPorvider()
+	executions := executionsProvider()
 
 	for _, exec := range executions {
-		suite.db.Exec(
+		_, _ = suite.db.Exec(
 			"insert into " + ExecutionsTable + " values (" +
 				strconv.Itoa(int(exec.Version)) + "," +
 				strconv.Itoa(int(exec.ExecutedAtMs)) + "," +
@@ -110,9 +129,39 @@ func (suite *MysqlTestSuite) TestItCanLoadExecutions() {
 	suite.Assert().Len(executions, 0)
 }
 
-func (suite *MysqlTestSuite) TestItCanSasveExecutions() {
+func (suite *MysqlTestSuite) TestItFailsToExecuteAnyChangesWhenMissingTable() {
+	_, _ = suite.db.Exec("drop table `" + suite.handler.tableName + "`")
+	migrationExecution := execution.StartExecution(migration.NewDummyMigration(123))
+	_, errLoad := suite.handler.LoadExecutions()
+	errSave := suite.handler.Save(*migrationExecution)
+	errRemove := suite.handler.Remove(*migrationExecution)
+	_, errFindOne := suite.handler.FindOne(uint64(123))
+
+	suite.Assert().Error(errLoad)
+	suite.Assert().ErrorContains(errLoad, suite.handler.tableName)
+	suite.Assert().Error(errSave)
+	suite.Assert().ErrorContains(errSave, suite.handler.tableName)
+	suite.Assert().Error(errRemove)
+	suite.Assert().ErrorContains(errRemove, suite.handler.tableName)
+	suite.Assert().Error(errFindOne)
+	suite.Assert().ErrorContains(errFindOne, suite.handler.tableName)
+}
+
+func (suite *MysqlTestSuite) TestItFailsToLoadExecutionsFromInvalidRepoData() {
+	_, _ = suite.db.Exec(
+		"alter table `" + suite.handler.tableName +
+			"` modify column `finished_at_ms` bigint unsigned default null",
+	)
+	_, _ = suite.db.Exec("insert into `" + suite.handler.tableName + "` values (1,2,1), (3,4,null)")
+	execs, err := suite.handler.LoadExecutions()
+	suite.Assert().Len(execs, 1)
+	suite.Assert().Error(err)
+	suite.Assert().ErrorContains(err, "Scan error")
+}
+
+func (suite *MysqlTestSuite) TestItCanSaveExecutions() {
 	// Insert
-	executions := executionsPorvider()
+	executions := executionsProvider()
 
 	for _, exec := range executions {
 		err := suite.handler.Save(exec)
@@ -142,10 +191,10 @@ func (suite *MysqlTestSuite) TestItCanSasveExecutions() {
 }
 
 func (suite *MysqlTestSuite) TestItCanRemoveExecution() {
-	executions := executionsPorvider()
+	executions := executionsProvider()
 
 	for _, exec := range executions {
-		suite.handler.Save(exec)
+		_ = suite.handler.Save(exec)
 		err := suite.handler.Remove(exec)
 		suite.Assert().NoError(err)
 	}
@@ -153,4 +202,26 @@ func (suite *MysqlTestSuite) TestItCanRemoveExecution() {
 	savedExecs, _ := suite.handler.LoadExecutions()
 
 	suite.Assert().Len(savedExecs, 0)
+}
+
+func (suite *MysqlTestSuite) TestItCanFindOne() {
+	executions := executionsProvider()
+
+	for _, exec := range executions {
+		_, _ = suite.db.Exec(
+			"insert into " + ExecutionsTable + " values (" +
+				strconv.Itoa(int(exec.Version)) + "," +
+				strconv.Itoa(int(exec.ExecutedAtMs)) + "," +
+				strconv.Itoa(int(exec.FinishedAtMs)) + ")",
+		)
+	}
+
+	execToFind := executions[uint64(4)]
+	foundExec, err := suite.handler.FindOne(uint64(4))
+	suite.Assert().Equal(&execToFind, foundExec)
+	suite.Assert().Nil(err)
+	_, _ = suite.db.Exec("delete from `" + suite.handler.tableName + "`")
+	foundExec, err = suite.handler.FindOne(uint64(4))
+	suite.Assert().Nil(foundExec)
+	suite.Assert().Nil(err)
 }
