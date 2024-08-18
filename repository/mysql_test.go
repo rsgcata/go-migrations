@@ -49,7 +49,7 @@ func (suite *MysqlTestSuite) SetupSuite() {
 	_, _ = tmpDb.Exec("CREATE DATABASE " + suite.dbName)
 	_ = tmpDb.Close()
 
-	suite.db, _ = sql.Open("mysql", suite.dsn)
+	suite.db, _ = NewDbHandle(suite.dsn)
 	suite.handler = &MysqlHandler{suite.db, ExecutionsTable, context.Background()}
 }
 

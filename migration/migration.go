@@ -124,9 +124,14 @@ func GenerateBlankMigration(dirPath MigrationsDirPath) (fileName string, err err
 			"%w, file creation failed with error: %w", ErrBlankMigration, err,
 		)
 	}
+
 	defer func(file *os.File) {
-		if closeErr := file.Close(); closeErr != nil {
-			err = errors.Join(err, closeErr)
+		closeErr := file.Close()
+
+		if err != nil {
+			if removeErr := os.Remove(filePath); removeErr != nil || closeErr != nil {
+				err = errors.Join(err, removeErr, closeErr)
+			}
 		}
 	}(file)
 
@@ -134,14 +139,9 @@ func GenerateBlankMigration(dirPath MigrationsDirPath) (fileName string, err err
 		err = fmt.Errorf(
 			"%w, failed to generate contents with error: %w", ErrBlankMigration, err,
 		)
-		closeErr := file.Close()
-
-		if removeErr := os.Remove(filePath); closeErr != nil || removeErr != nil {
-			err = errors.Join(err, closeErr, removeErr)
-		}
 
 		return "", err
 	}
 
-	return fileName, nil
+	return fileName, err
 }

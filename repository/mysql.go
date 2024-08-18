@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"errors"
 
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/rsgcata/go-migrations/execution"
@@ -16,6 +17,11 @@ type MysqlHandler struct {
 
 func NewDbHandle(dsn string) (*sql.DB, error) {
 	db, err := sql.Open("mysql", dsn)
+
+	if db == nil {
+		return nil, err
+	}
+
 	db.SetMaxIdleConns(1)
 	db.SetMaxOpenConns(1)
 	db.SetConnMaxIdleTime(0)
@@ -23,9 +29,10 @@ func NewDbHandle(dsn string) (*sql.DB, error) {
 	return db, err
 }
 
-// db should be a standalone, dedicated connection object. It should not be used by migrations.
+// NewMysqlHandler db should be a standalone, dedicated connection object.
+// It should not be used by migration files.
 // Using db for executions repository and migrations may cause unexpected behaviour when database
-// locks are involved
+// locks or transactions are involved
 func NewMysqlHandler(
 	db *sql.DB,
 	tableName string,
@@ -51,24 +58,32 @@ func (h *MysqlHandler) Init() error {
 	return err
 }
 
-func (h *MysqlHandler) LoadExecutions() ([]execution.MigrationExecution, error) {
-	rows, err := h.db.QueryContext(h.ctx, "SELECT SQL_NO_CACHE * FROM "+"`"+h.tableName+"`")
-	var executions []execution.MigrationExecution
+func (h *MysqlHandler) LoadExecutions() (executions []execution.MigrationExecution, err error) {
+	rows, err := h.db.QueryContext(
+		h.ctx,
+		"SELECT SQL_NO_CACHE * FROM `"+h.tableName+"`",
+	)
 
 	if err != nil {
 		return executions, err
 	}
-	defer rows.Close()
+
+	defer func(rows *sql.Rows) {
+		if closeErr := rows.Close(); closeErr != nil && err != nil {
+			err = errors.Join(err, closeErr)
+		}
+	}(rows)
 
 	for rows.Next() {
-		var execution execution.MigrationExecution
-		if err := rows.Scan(&execution.Version, &execution.ExecutedAtMs, &execution.FinishedAtMs); err != nil {
+		var exec execution.MigrationExecution
+		if err = rows.Scan(&exec.Version, &exec.ExecutedAtMs, &exec.FinishedAtMs); err != nil {
 			return executions, err
 		}
-		executions = append(executions, execution)
+		executions = append(executions, exec)
 	}
 
-	return executions, rows.Err()
+	err = rows.Err()
+	return executions, err
 }
 
 func (h *MysqlHandler) Save(execution execution.MigrationExecution) error {
@@ -94,7 +109,7 @@ func (h *MysqlHandler) Remove(execution execution.MigrationExecution) error {
 func (h *MysqlHandler) FindOne(version uint64) (*execution.MigrationExecution, error) {
 	row := h.db.QueryRowContext(
 		h.ctx,
-		"SELECT SQL_NO_CACHE * FROM "+"`"+h.tableName+"` WHERE `version` = ?",
+		"SELECT SQL_NO_CACHE * FROM `"+h.tableName+"` WHERE `version` = ?",
 		version,
 	)
 
@@ -102,14 +117,14 @@ func (h *MysqlHandler) FindOne(version uint64) (*execution.MigrationExecution, e
 		return nil, nil
 	}
 
-	var execution execution.MigrationExecution
-	err := row.Scan(&execution.Version, &execution.ExecutedAtMs, &execution.FinishedAtMs)
+	var exec execution.MigrationExecution
+	err := row.Scan(&exec.Version, &exec.ExecutedAtMs, &exec.FinishedAtMs)
 
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	} else if err != nil {
 		return nil, err
 	}
 
-	return &execution, row.Err()
+	return &exec, row.Err()
 }

@@ -1,7 +1,6 @@
 package migration
 
 import (
-	"fmt"
 	"os"
 	"path"
 	"path/filepath"
@@ -119,7 +118,6 @@ func (suite *MigrationTestSuite) TestItFailsToGenerateTemplateWithInvalidTemplat
 	for _, item := range items {
 		if !item.Type().IsDir() {
 			filesCount++
-			fmt.Println(item.Name())
 		}
 	}
 	suite.Assert().Equal(0, filesCount, "generated migration file was not removed")

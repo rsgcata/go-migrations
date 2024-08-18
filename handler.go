@@ -33,9 +33,11 @@ func NewExecutionPlan(
 		)
 	}
 
-	sort.Slice(executions, func(i, j int) bool {
-		return executions[i].Version < executions[j].Version
-	})
+	sort.Slice(
+		executions, func(i, j int) bool {
+			return executions[i].Version < executions[j].Version
+		},
+	)
 
 	plan := &ExecutionPlan{
 		orderedMigrations: registry.OrderedMigrations(),
@@ -50,20 +52,20 @@ func NewExecutionPlan(
 		)
 	}
 
-	for i, ev := range plan.orderedExecutions {
-		if !ev.Finished() && i != len(plan.orderedExecutions)-1 {
+	for i, exec := range plan.orderedExecutions {
+		if !exec.Finished() && i != len(plan.orderedExecutions)-1 {
 			return nil, fmt.Errorf(
 				"%s, there are multiple executions which are not finished."+
-					" Only the last execution should have an \"unfinished\" state. %s"+
-					genericErrMsg, errHelpMsg,
+					" Only the last execution should have an \"unfinished\" state. %s",
+				genericErrMsg, errHelpMsg,
 			)
 		}
 
-		if ev.Version != plan.orderedMigrations[i].Version() {
+		if exec.Version != plan.orderedMigrations[i].Version() {
 			return nil, fmt.Errorf(
 				"%s, execution %d at index %d does not match with registered migration"+
 					" %d at index %d. %s",
-				genericErrMsg, ev, i, plan.orderedMigrations[i].Version(), i, errHelpMsg,
+				genericErrMsg, exec, i, plan.orderedMigrations[i].Version(), i, errHelpMsg,
 			)
 		}
 	}
@@ -186,7 +188,7 @@ func (handler *MigrationsHandler) MigrateUp() ([]HandledMigration, error) {
 	}
 
 	migrationToExec := plan.Next()
-	handledMigrations := []HandledMigration{}
+	var handledMigrations []HandledMigration
 	for migrationToExec != nil {
 		exec := execution.StartExecution(migrationToExec)
 
@@ -233,7 +235,7 @@ func (handler *MigrationsHandler) MigratePrev() (HandledMigration, error) {
 	}
 
 	exec := plan.PopExecution()
-	handler.repository.Remove(*exec)
+	err = handler.repository.Remove(*exec)
 
 	return HandledMigration{migrationToExec, exec}, err
 }
@@ -253,7 +255,7 @@ func (handler *MigrationsHandler) MigrateDown() ([]HandledMigration, error) {
 	}
 
 	migrationToExec := plan.Prev()
-	handledMigrations := []HandledMigration{}
+	var handledMigrations []HandledMigration
 	for migrationToExec != nil {
 		if err = migrationToExec.Down(); err != nil {
 			handledMigrations = append(handledMigrations, HandledMigration{migrationToExec, nil})
@@ -324,7 +326,7 @@ func (handler *MigrationsHandler) ForceDown(version uint64) (HandledMigration, e
 
 	if exec == nil {
 		return HandledMigration{migrationToExec, nil}, fmt.Errorf(
-			"%s, execution not found. Maybe the migration was never executed?", errMsg,
+			"%s, execution not found. Maybe the migration was never executed", errMsg,
 		)
 	}
 
@@ -334,7 +336,7 @@ func (handler *MigrationsHandler) ForceDown(version uint64) (HandledMigration, e
 		)
 	}
 
-	handler.repository.Remove(*exec)
+	err = handler.repository.Remove(*exec)
 
 	return HandledMigration{migrationToExec, exec}, err
 }

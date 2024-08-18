@@ -116,8 +116,8 @@ func (registry *DirMigrationsRegistry) HasAllMigrationsRegistered() (
 	dirEntries, err := os.ReadDir(string(registry.dirPath))
 	if err != nil {
 		return false, []string{}, []string{}, fmt.Errorf(
-			"failed to check if all migrations have been registered. Dir entries read failed"+
-				" with error: %w", err,
+			"failed to check if all migrations have been registered."+
+				" Dir entries read failed with error: %w", err,
 		)
 	}
 

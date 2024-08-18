@@ -254,6 +254,24 @@ func (suite *HandlerTestSuite) TestItCanGetPreviousMigrationFromExecutionPlan() 
 	}
 }
 
+func (suite *HandlerTestSuite) TestItCanAddAndPopExecutionToPlan() {
+	migrationsRegistry := migration.NewGenericRegistry()
+	_ = migrationsRegistry.Register(migration.NewDummyMigration(1))
+	_ = migrationsRegistry.Register(migration.NewDummyMigration(2))
+	_ = migrationsRegistry.Register(migration.NewDummyMigration(3))
+
+	plan, _ := NewExecutionPlan(migrationsRegistry, &RepoMock{})
+
+	suite.Assert().Nil(plan.PopExecution())
+
+	plan.AddExecution(*execution.StartExecution(migrationsRegistry.Get(1)))
+	plan.AddExecution(*execution.StartExecution(migrationsRegistry.Get(2)))
+
+	suite.Assert().True(plan.Prev().Version() == 2)
+	suite.Assert().True(plan.PopExecution().Version == 2)
+	suite.Assert().True(plan.Prev().Version() == 1)
+}
+
 func (suite *HandlerTestSuite) TestItCanCountMigrationsAndExecutionsFromPlan() {
 	registry := migration.NewGenericRegistry()
 	_ = registry.Register(migration.NewDummyMigration(1))
@@ -288,7 +306,7 @@ func (suite *HandlerTestSuite) TestItFailsToBuildHandlerWhenRepoInitializationFa
 	suite.Assert().Contains(err.Error(), errMsg)
 }
 
-func (suite *HandlerTestSuite) TestItCanMigrateUpTheProperNextAvailableMigration() {
+func (suite *HandlerTestSuite) TestItCanMigrateUpNextAvailableMigration() {
 	scenarios := map[string]struct {
 		availableMigrations []migration.Migration
 		initialExecutions   []execution.MigrationExecution
@@ -436,3 +454,7 @@ func (suite *HandlerTestSuite) TestItFailsToMigrateNextWithMissingExecutionPlan(
 	suite.Assert().Nil(handledMigration.Migration)
 	suite.Assert().Contains(err.Error(), errMsg)
 }
+
+//func (suite *HandlerTestSuite) TestItCanMigrateAllUp() {
+//
+//}
