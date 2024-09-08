@@ -11,14 +11,13 @@ import (
 	"time"
 )
 
-// TmplContents Migration file template to be used to generate a new, base migration file
-// to be easier for devs to create new migrations.
+// TmplContents File template to be used to generate a new, base migration file
+// to make it easier for devs to create new migrations.
 //
 //go:embed migration.go.template
 var TmplContents string
 
-// FileNamePrefix Migration file name prefix, static value,
-// which will be set for all migration files.
+// FileNamePrefix File name prefix, static value, which will be set for all migration files.
 const FileNamePrefix = "version"
 
 // FileNameSeparator A separator used to separate words in a migration file.
