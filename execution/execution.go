@@ -34,18 +34,20 @@ func (execution *MigrationExecution) Finished() bool {
 
 // Repository Must be implemented by any storage mechanism and must handle everything related
 // to migration executions persistence
-// [Repository.Init] Must handle the initialization phase of a repository/storage mechanism. This
-// can be setting up the database table if it's a sql type of storage or consistency checks between
-// executions and migrations (for example, there may be executions persisted which do not have
-// a match in the collection of registered migrations)
-// [Repository.LoadExecutions] Must return all persisted migration executions
-// [Repository.Save] Must persist a migration execution
-// [Repository.Remove] Must remove a migration execution
-// [Repository.FindOne] Must find a migration execution using the version as filter
 type Repository interface {
+	// Init Must handle the initialization phase of a repository/storage mechanism. This
+	// can be setting up the database table if it's a sql type of storage
 	Init() error
+
+	// LoadExecutions Must return all persisted migration executions
 	LoadExecutions() ([]MigrationExecution, error)
+
+	// Save Must persist a migration execution
 	Save(execution MigrationExecution) error
+
+	// Remove Must remove a migration execution
 	Remove(execution MigrationExecution) error
+
+	// FindOne Must find a migration execution using the version as filter
 	FindOne(version uint64) (*MigrationExecution, error)
 }
