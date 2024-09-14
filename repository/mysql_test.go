@@ -49,8 +49,8 @@ func (suite *MysqlTestSuite) SetupSuite() {
 	_, _ = tmpDb.Exec("CREATE DATABASE " + suite.dbName)
 	_ = tmpDb.Close()
 
-	suite.db, _ = NewDbHandle(suite.dsn)
-	suite.handler = &MysqlHandler{suite.db, ExecutionsTable, context.Background()}
+	suite.handler, _ = NewMysqlHandler(suite.dsn, ExecutionsTable, context.Background())
+	suite.db = suite.handler.db
 }
 
 func (suite *MysqlTestSuite) TearDownSuite() {
@@ -68,7 +68,7 @@ func (suite *MysqlTestSuite) TearDownTest() {
 }
 
 func (suite *MysqlTestSuite) TestItCanBuildMigrationsExclusiveDbHandle() {
-	handle, err := NewDbHandle(suite.dsn)
+	handle, err := newDbHandle(suite.dsn)
 
 	suite.Assert().Nil(err)
 	suite.Assert().Equal(1, handle.Stats().MaxOpenConnections)
@@ -81,7 +81,8 @@ func (suite *MysqlTestSuite) TestItCanBuildMigrationsExclusiveDbHandle() {
 func (suite *MysqlTestSuite) TestItCanBuildHandlerWithProvidedContext() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	handler := NewMysqlHandler(suite.db, "migration_execs", ctx)
+	handler, err := NewMysqlHandler(suite.dsn, "migration_execs", ctx)
+	suite.Assert().Nil(err)
 	suite.Assert().Same(ctx, handler.Context())
 }
 

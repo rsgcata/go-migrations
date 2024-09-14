@@ -26,15 +26,16 @@ func main() {
 	}
 
 	dbDsn := getDbDsn()
-	repoDb, err := repository.NewDbHandle(dbDsn)
+	repo, err := repository.NewMysqlHandler(
+		dbDsn, "migration_executions", context.Background(),
+	)
 
 	if err != nil {
-		panic(fmt.Errorf("failed to build executions repository db: %w", err))
+		panic(fmt.Errorf("failed to build executions repository: %w", err))
 	}
 
 	migRegistry := migration.NewDirMigrationsRegistry(dirPath)
 	populateRegistry(migRegistry, ctx, dbDsn)
-	repo := repository.NewMysqlHandler(repoDb, "migration_executions", context.Background())
 
 	Bootstrap(os.Args[1:], migRegistry, repo, dirPath)
 }
@@ -68,7 +69,11 @@ func populateRegistry(
 		panic(fmt.Errorf("failed to build migrations db: %w", err))
 	}
 
-	migRegistry.Register(&tmp.Migration1712953077{Db: db})
-	migRegistry.Register(&tmp.Migration1712953080{Db: db})
-	migRegistry.Register(&tmp.Migration1712953083{Db: db, Ctx: ctx})
+	_ = migRegistry.Register(&tmp.Migration1712953077{Db: db})
+	_ = migRegistry.Register(&tmp.Migration1712953080{Db: db})
+	_ = migRegistry.Register(&tmp.Migration1712953083{Db: db, Ctx: ctx})
+
+	if _, _, registryErr, _ := migRegistry.HasAllMigrationsRegistered(); registryErr != nil {
+		panic(fmt.Errorf("registry has invalid state: %w", err))
+	}
 }

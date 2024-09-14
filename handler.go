@@ -2,13 +2,14 @@ package main
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 
 	"github.com/rsgcata/go-migrations/execution"
 	"github.com/rsgcata/go-migrations/migration"
 )
 
-type HandledMigration struct {
+type ExecutedMigration struct {
 	Migration migration.Migration
 	Execution *execution.MigrationExecution
 }
@@ -16,10 +17,9 @@ type HandledMigration struct {
 type ExecutionPlan struct {
 	orderedMigrations []migration.Migration
 	orderedExecutions []execution.MigrationExecution
-	registry          migration.MigrationsRegistry
 }
 
-func NewExecutionPlan(
+func NewPlan(
 	registry migration.MigrationsRegistry,
 	repository execution.Repository,
 ) (*ExecutionPlan, error) {
@@ -42,7 +42,6 @@ func NewExecutionPlan(
 	plan := &ExecutionPlan{
 		orderedMigrations: registry.OrderedMigrations(),
 		orderedExecutions: executions,
-		registry:          registry,
 	}
 
 	if len(plan.orderedExecutions) > len(plan.orderedMigrations) {
@@ -64,7 +63,7 @@ func NewExecutionPlan(
 		if exec.Version != plan.orderedMigrations[i].Version() {
 			return nil, fmt.Errorf(
 				"%s, execution %d at index %d does not match with registered migration"+
-					" %d at index %d. %s",
+					" %d at index %d. Migrations and executions are out of order. %s",
 				genericErrMsg, exec, i, plan.orderedMigrations[i].Version(), i, errHelpMsg,
 			)
 		}
@@ -73,93 +72,120 @@ func NewExecutionPlan(
 	return plan, err
 }
 
-func (plan *ExecutionPlan) Next() migration.Migration {
-	executionsCount := len(plan.orderedExecutions)
+func (plan *ExecutionPlan) NextToExecute() migration.Migration {
+	finishedExecCount := plan.FinishedExecutionsCount()
 
-	if executionsCount > 0 &&
-		!plan.orderedExecutions[executionsCount-1].Finished() {
-		return plan.registry.Get(plan.orderedExecutions[executionsCount-1].Version)
-	} else if plan.registry.Count() > executionsCount {
-		nextVersion := plan.orderedMigrations[executionsCount].Version()
-		return plan.registry.Get(nextVersion)
+	if len(plan.orderedMigrations) > finishedExecCount {
+		return plan.orderedMigrations[finishedExecCount]
 	}
 
 	return nil
 }
 
-func (plan *ExecutionPlan) Prev() migration.Migration {
+func (plan *ExecutionPlan) LastExecuted() ExecutedMigration {
 	executionsCount := len(plan.orderedExecutions)
 
 	if executionsCount > 0 {
-		return plan.registry.Get(plan.orderedExecutions[executionsCount-1].Version)
+		return ExecutedMigration{
+			plan.orderedMigrations[executionsCount-1],
+			&plan.orderedExecutions[executionsCount-1],
+		}
 	}
 
-	return nil
+	return ExecutedMigration{}
 }
 
-func (plan *ExecutionPlan) AddExecution(execution execution.MigrationExecution) {
-	plan.orderedExecutions = append(plan.orderedExecutions, execution)
-}
+func (plan *ExecutionPlan) AllToBeExecuted() []migration.Migration {
+	finishedExecCount := plan.FinishedExecutionsCount()
 
-func (plan *ExecutionPlan) PopExecution() *execution.MigrationExecution {
-	executionsCount := len(plan.orderedExecutions)
-
-	if executionsCount > 0 {
-		exec := plan.orderedExecutions[executionsCount-1]
-		plan.orderedExecutions = plan.orderedExecutions[:executionsCount-1]
-		return &exec
+	if finishedExecCount < plan.RegisteredMigrationsCount() {
+		return plan.orderedMigrations[finishedExecCount:]
 	}
 
-	return nil
+	return []migration.Migration{}
+}
+
+func (plan *ExecutionPlan) AllExecuted() []ExecutedMigration {
+	var execMigrations []ExecutedMigration
+
+	for i, exec := range plan.orderedExecutions {
+		execMigrations = append(
+			execMigrations, ExecutedMigration{
+				Migration: plan.orderedMigrations[i],
+				Execution: &exec,
+			},
+		)
+	}
+
+	return execMigrations
 }
 
 func (plan *ExecutionPlan) RegisteredMigrationsCount() int {
 	return len(plan.orderedMigrations)
 }
 
-func (plan *ExecutionPlan) ExecutionsCount() int {
-	return len(plan.orderedExecutions)
+func (plan *ExecutionPlan) FinishedExecutionsCount() int {
+	count := len(plan.orderedExecutions)
+	if count > 0 && !plan.orderedExecutions[count-1].Finished() {
+		count--
+	}
+	return count
 }
 
+type ExecutionPlanBuilder func(
+	registry migration.MigrationsRegistry,
+	repository execution.Repository,
+) (*ExecutionPlan, error)
+
 type MigrationsHandler struct {
-	registry   migration.MigrationsRegistry
-	repository execution.Repository
+	registry         migration.MigrationsRegistry
+	repository       execution.Repository
+	newExecutionPlan ExecutionPlanBuilder
 }
 
 func NewHandler(
 	registry migration.MigrationsRegistry,
 	repository execution.Repository,
+	newExecutionPlan ExecutionPlanBuilder,
 ) (*MigrationsHandler, error) {
 	err := repository.Init()
-	errMsg := "could not create new migrations handler"
 
 	if err != nil {
 		return nil, fmt.Errorf(
-			"%s, failed to initialize the repository with error: %w", errMsg, err,
+			"could not create new migrations handler,"+
+				" failed to initialize the repository with error: %w", err,
 		)
 	}
 
-	return &MigrationsHandler{registry: registry, repository: repository}, nil
-}
-
-func (handler *MigrationsHandler) MigrateNext() (HandledMigration, error) {
-	if handler.registry.Count() == 0 {
-		return HandledMigration{nil, nil}, nil
+	if newExecutionPlan == nil {
+		newExecutionPlan = NewPlan
 	}
 
-	errMsg := "failed to migrate up"
+	return &MigrationsHandler{
+		registry:         registry,
+		repository:       repository,
+		newExecutionPlan: newExecutionPlan,
+	}, nil
+}
 
-	plan, err := NewExecutionPlan(handler.registry, handler.repository)
+func (handler *MigrationsHandler) MigrateOneUp() (ExecutedMigration, error) {
+	if handler.registry.Count() == 0 {
+		return ExecutedMigration{nil, nil}, nil
+	}
+
+	errMsg := "failed to migrate one up"
+
+	plan, err := handler.newExecutionPlan(handler.registry, handler.repository)
 	if err != nil {
-		return HandledMigration{nil, nil}, fmt.Errorf(
+		return ExecutedMigration{nil, nil}, fmt.Errorf(
 			"%s, failed to create execution plan with error: %w", errMsg, err,
 		)
 	}
 
-	migrationToExec := plan.Next()
+	migrationToExec := plan.NextToExecute()
 
 	if migrationToExec == nil {
-		return HandledMigration{nil, nil}, nil
+		return ExecutedMigration{nil, nil}, nil
 	}
 
 	exec := execution.StartExecution(migrationToExec)
@@ -169,122 +195,111 @@ func (handler *MigrationsHandler) MigrateNext() (HandledMigration, error) {
 		exec.FinishExecution()
 	}
 
-	err = handler.repository.Save(*exec)
-	return HandledMigration{migrationToExec, exec}, err
+	saveErr := handler.repository.Save(*exec)
+
+	if err != nil || saveErr != nil {
+		err = fmt.Errorf(
+			"%s, errors: %w, %w", errMsg, err, saveErr,
+		)
+	}
+
+	return ExecutedMigration{migrationToExec, exec}, err
 }
 
-func (handler *MigrationsHandler) MigrateUp() ([]HandledMigration, error) {
+func (handler *MigrationsHandler) MigrateAllUp() ([]ExecutedMigration, error) {
 	if handler.registry.Count() == 0 {
-		return []HandledMigration{}, nil
+		return []ExecutedMigration{}, nil
 	}
 
 	errMsg := "failed to migrate all up"
 
-	plan, err := NewExecutionPlan(handler.registry, handler.repository)
+	plan, err := handler.newExecutionPlan(handler.registry, handler.repository)
 	if err != nil {
-		return []HandledMigration{}, fmt.Errorf(
+		return []ExecutedMigration{}, fmt.Errorf(
 			"%s, failed to create execution plan with error: %w", errMsg, err,
 		)
 	}
 
-	migrationToExec := plan.Next()
-	var handledMigrations []HandledMigration
-	for migrationToExec != nil {
+	allToBeExec := plan.AllToBeExecuted()
+	var handledMigrations []ExecutedMigration
+	for _, migrationToExec := range allToBeExec {
 		exec := execution.StartExecution(migrationToExec)
 
 		if err = migrationToExec.Up(); err == nil {
 			exec.FinishExecution()
 		}
 
-		err = handler.repository.Save(*exec)
-		handledMigrations = append(handledMigrations, HandledMigration{migrationToExec, exec})
-		plan.AddExecution(*exec)
+		handledMigrations = append(handledMigrations, ExecutedMigration{migrationToExec, exec})
+		saveErr := handler.repository.Save(*exec)
 
-		if err != nil {
+		if err != nil || saveErr != nil {
+			err = fmt.Errorf("%s, errors: %w, %w", errMsg, err, saveErr)
 			break
 		}
-
-		migrationToExec = plan.Next()
 	}
 
 	return handledMigrations, err
 }
 
-func (handler *MigrationsHandler) MigratePrev() (HandledMigration, error) {
-	if handler.registry.Count() == 0 {
-		return HandledMigration{nil, nil}, nil
-	}
+func (handler *MigrationsHandler) MigrateOneDown() (ExecutedMigration, error) {
+	errMsg := "failed to migrate one down"
 
-	errMsg := "failed to migrate down"
-
-	plan, err := NewExecutionPlan(handler.registry, handler.repository)
+	plan, err := handler.newExecutionPlan(handler.registry, handler.repository)
 	if err != nil {
-		return HandledMigration{nil, nil}, fmt.Errorf(
+		return ExecutedMigration{nil, nil}, fmt.Errorf(
 			"%s, failed to create execution plan with error: %w", errMsg, err,
 		)
 	}
 
-	migrationToExec := plan.Prev()
-
-	if migrationToExec == nil {
-		return HandledMigration{nil, nil}, nil
+	lastExec := plan.LastExecuted()
+	if lastExec.Migration == nil {
+		return ExecutedMigration{nil, nil}, nil
 	}
 
-	if err = migrationToExec.Down(); err != nil {
-		return HandledMigration{migrationToExec, nil}, err
+	if err = lastExec.Migration.Down(); err != nil {
+		return ExecutedMigration{lastExec.Migration, nil}, err
 	}
 
-	exec := plan.PopExecution()
-	err = handler.repository.Remove(*exec)
-
-	return HandledMigration{migrationToExec, exec}, err
+	err = handler.repository.Remove(*lastExec.Execution)
+	return lastExec, err
 }
 
-func (handler *MigrationsHandler) MigrateDown() ([]HandledMigration, error) {
-	if handler.registry.Count() == 0 {
-		return []HandledMigration{}, nil
-	}
-
+func (handler *MigrationsHandler) MigrateAllDown() ([]ExecutedMigration, error) {
 	errMsg := "failed to migrate all down"
 
-	plan, err := NewExecutionPlan(handler.registry, handler.repository)
+	plan, err := handler.newExecutionPlan(handler.registry, handler.repository)
 	if err != nil {
-		return []HandledMigration{}, fmt.Errorf(
+		return []ExecutedMigration{}, fmt.Errorf(
 			"%s, failed to create execution plan with error: %w", errMsg, err,
 		)
 	}
 
-	migrationToExec := plan.Prev()
-	var handledMigrations []HandledMigration
-	for migrationToExec != nil {
-		if err = migrationToExec.Down(); err != nil {
-			handledMigrations = append(handledMigrations, HandledMigration{migrationToExec, nil})
+	execMigrations := plan.AllExecuted()
+	slices.Reverse(execMigrations)
+	var handledMigrations []ExecutedMigration
+	for _, execMig := range execMigrations {
+		if err = execMig.Migration.Down(); err != nil {
+			handledMigrations = append(handledMigrations, ExecutedMigration{execMig.Migration, nil})
 			break
 		}
 
-		exec := plan.PopExecution()
-		err = handler.repository.Remove(*exec)
+		err = handler.repository.Remove(*execMig.Execution)
 
 		if err != nil {
-			handledMigrations = append(handledMigrations, HandledMigration{migrationToExec, nil})
+			handledMigrations = append(handledMigrations, ExecutedMigration{execMig.Migration, nil})
 			break
 		}
 
-		handledMigrations = append(handledMigrations, HandledMigration{migrationToExec, exec})
-		migrationToExec = plan.Prev()
+		handledMigrations = append(handledMigrations, execMig)
 	}
 
 	return handledMigrations, err
 }
 
-func (handler *MigrationsHandler) ForceUp(version uint64) (HandledMigration, error) {
-	if handler.registry.Count() == 0 {
-		return HandledMigration{nil, nil}, nil
-	}
-
+func (handler *MigrationsHandler) ForceUp(version uint64) (ExecutedMigration, error) {
 	migrationToExec := handler.registry.Get(version)
 	if migrationToExec == nil {
-		return HandledMigration{nil, nil}, nil
+		return ExecutedMigration{nil, nil}, nil
 	}
 
 	exec := execution.StartExecution(migrationToExec)
@@ -302,41 +317,37 @@ func (handler *MigrationsHandler) ForceUp(version uint64) (HandledMigration, err
 		err = fmt.Errorf("%w, %w", err, errSave)
 	}
 
-	return HandledMigration{migrationToExec, exec}, err
+	return ExecutedMigration{migrationToExec, exec}, err
 }
 
-func (handler *MigrationsHandler) ForceDown(version uint64) (HandledMigration, error) {
-	if handler.registry.Count() == 0 {
-		return HandledMigration{nil, nil}, nil
-	}
-
+func (handler *MigrationsHandler) ForceDown(version uint64) (ExecutedMigration, error) {
 	errMsg := "failed to migrate down forcefully"
 
 	migrationToExec := handler.registry.Get(version)
 	if migrationToExec == nil {
-		return HandledMigration{nil, nil}, nil
+		return ExecutedMigration{nil, nil}, nil
 	}
 
 	exec, err := handler.repository.FindOne(version)
 	if err != nil {
-		return HandledMigration{migrationToExec, nil}, fmt.Errorf(
+		return ExecutedMigration{migrationToExec, nil}, fmt.Errorf(
 			"%s, failed to load execution with error: %w", errMsg, err,
 		)
 	}
 
 	if exec == nil {
-		return HandledMigration{migrationToExec, nil}, fmt.Errorf(
+		return ExecutedMigration{migrationToExec, nil}, fmt.Errorf(
 			"%s, execution not found. Maybe the migration was never executed", errMsg,
 		)
 	}
 
-	if err := migrationToExec.Down(); err != nil {
-		return HandledMigration{migrationToExec, nil}, fmt.Errorf(
-			"%s, down() failed with error: %w", errMsg, err,
+	if errDown := migrationToExec.Down(); errDown != nil {
+		return ExecutedMigration{migrationToExec, nil}, fmt.Errorf(
+			"%s, down() failed with error: %w", errMsg, errDown,
 		)
 	}
 
 	err = handler.repository.Remove(*exec)
 
-	return HandledMigration{migrationToExec, exec}, err
+	return ExecutedMigration{migrationToExec, exec}, err
 }

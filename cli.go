@@ -24,12 +24,13 @@ func Bootstrap(
 	repository execution.Repository,
 	dirPath migration.MigrationsDirPath,
 ) {
-	handler, err := NewHandler(registry, repository)
+	handler, err := NewHandler(registry, repository, nil)
 
 	if err != nil {
 		panic(
 			fmt.Errorf(
-				"coult not bootstrap cli, failed to create new migrations handler with error: %w", err,
+				"coult not bootstrap cli, %s: %w",
+				"failed to create new migrations handler with error", err,
 			),
 		)
 	}
@@ -46,38 +47,37 @@ func Bootstrap(
 
 	availableCommands := make(map[string]Command)
 
-	prev := &MigratePrevCommand{handler: handler}
-	next := &MigrateNextCommand{handler: handler}
-	up := &MigrateUpCommand{handler: handler}
-	down := &MigrateDownCommand{handler: handler}
+	oneUp := &MigrateOneDownCommand{handler: handler}
+	oneDown := &MigrateOneUpCommand{handler: handler}
+	allUp := &MigrateAllUpCommand{handler: handler}
+	allDown := &MigrateAllDownCommand{handler: handler}
 	forceUp := &MigrateForceUpCommand{handler: handler, args: args}
 	forceDown := &MigrateForceDownCommand{handler: handler, args: args}
 	stats := &MigrateStatsCommand{registry: registry, repository: repository}
 	blank := &GenerateBlankMigrationCommand{dirPath}
-	availableCommands[prev.Name()] = prev
-	availableCommands[next.Name()] = next
-	availableCommands[up.Name()] = up
-	availableCommands[down.Name()] = down
-	availableCommands[stats.Name()] = stats
-	availableCommands[blank.Name()] = blank
+	availableCommands[oneUp.Name()] = oneUp
+	availableCommands[oneDown.Name()] = oneDown
+	availableCommands[allUp.Name()] = allUp
+	availableCommands[allDown.Name()] = allDown
 	availableCommands[forceUp.Name()] = forceUp
 	availableCommands[forceDown.Name()] = forceDown
+	availableCommands[stats.Name()] = stats
+	availableCommands[blank.Name()] = blank
 
 	help := &HelpCommand{availableCommands: availableCommands}
 
 	for _, cmd := range availableCommands {
 		if inputCmd == cmd.Name() {
-			err := cmd.Exec()
-
-			if err != nil {
-				fmt.Println("Failed to execute \"" + cmd.Name() + "\" with error: " + err.Error())
+			if cmdErr := cmd.Exec(); cmdErr != nil {
+				fmt.Println("Failed to execute \"" + cmd.Name() + "\" with error: " + cmdErr.Error())
 			}
-
 			return
 		}
 	}
 
-	help.Exec()
+	if cmdErr := help.Exec(); cmdErr != nil {
+		fmt.Println("Failed to execute \"" + help.Name() + "\" with error: " + cmdErr.Error())
+	}
 }
 
 type HelpCommand struct {
@@ -90,7 +90,7 @@ func (c *HelpCommand) Name() string {
 
 func (c *HelpCommand) Description() string {
 	return "Go Migrations is a database schema versioning tool" +
-		" which helps to easly deploy schema changes"
+		" which helps to easily deploy schema changes"
 }
 
 func (c *HelpCommand) Exec() error {
@@ -100,8 +100,8 @@ func (c *HelpCommand) Exec() error {
 	fmt.Println("Available commands:")
 	fmt.Println("")
 
-	wirter := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
-	fmt.Fprintln(wirter, c.Name()+"\tDisplays helpful information about this tool")
+	writer := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
+	_, _ = fmt.Fprintln(writer, c.Name()+"\tDisplays helpful information about this tool")
 
 	var names []string
 
@@ -111,109 +111,109 @@ func (c *HelpCommand) Exec() error {
 	sort.Strings(names)
 
 	for _, name := range names {
-		fmt.Fprintln(
-			wirter, c.availableCommands[name].Name()+"\t"+c.availableCommands[name].Description(),
+		_, _ = fmt.Fprintln(
+			writer, c.availableCommands[name].Name()+"\t"+c.availableCommands[name].Description(),
 		)
 	}
-	wirter.Flush()
+	_ = writer.Flush()
 
 	return nil
 }
 
-type MigratePrevCommand struct {
+type MigrateOneDownCommand struct {
 	handler *MigrationsHandler
 }
 
-func (c *MigratePrevCommand) Name() string {
-	return "prev"
+func (c *MigrateOneDownCommand) Name() string {
+	return "one:down"
 }
 
-func (c *MigratePrevCommand) Description() string {
+func (c *MigrateOneDownCommand) Description() string {
 	return "Executes Down() for the last executed migration"
 }
 
-func (c *MigratePrevCommand) Exec() error {
-	hmig, err := c.handler.MigratePrev()
+func (c *MigrateOneDownCommand) Exec() error {
+	execMig, err := c.handler.MigrateOneDown()
 
-	if hmig.Execution != nil {
-		fmt.Printf("Executed Down() for %d migration\n", hmig.Execution.Version)
+	if execMig.Execution != nil {
+		fmt.Printf("Executed Down() for %d migration\n", execMig.Execution.Version)
 	} else {
-		fmt.Print("No migration executed\n")
+		fmt.Print("No migration Down() executed\n")
 	}
 
 	return err
 }
 
-type MigrateNextCommand struct {
+type MigrateOneUpCommand struct {
 	handler *MigrationsHandler
 }
 
-func (c *MigrateNextCommand) Name() string {
-	return "next"
+func (c *MigrateOneUpCommand) Name() string {
+	return "one:up"
 }
 
-func (c *MigrateNextCommand) Description() string {
+func (c *MigrateOneUpCommand) Description() string {
 	return "Executes Up() for the next registered and not yet executed migration"
 }
 
-func (c *MigrateNextCommand) Exec() error {
-	hmig, err := c.handler.MigrateNext()
+func (c *MigrateOneUpCommand) Exec() error {
+	execMig, err := c.handler.MigrateOneUp()
 
-	if hmig.Migration != nil {
-		fmt.Printf("Executed Up() for %d migration\n", hmig.Migration.Version())
+	if execMig.Execution != nil {
+		fmt.Printf("Executed Up() for %d migration\n", execMig.Migration.Version())
 	} else {
-		fmt.Print("No migration executed\n")
+		fmt.Print("No migration Up() executed\n")
 	}
 
 	return err
 }
 
-type MigrateUpCommand struct {
+type MigrateAllUpCommand struct {
 	handler *MigrationsHandler
 }
 
-func (c *MigrateUpCommand) Name() string {
-	return "up"
+func (c *MigrateAllUpCommand) Name() string {
+	return "all:up"
 }
 
-func (c *MigrateUpCommand) Description() string {
+func (c *MigrateAllUpCommand) Description() string {
 	return "Executes Up() for the all registered and not yet executed migrations"
 }
 
-func (c *MigrateUpCommand) Exec() error {
-	mig, err := c.handler.MigrateUp()
+func (c *MigrateAllUpCommand) Exec() error {
+	execs, err := c.handler.MigrateAllUp()
 
-	fmt.Printf("Executed %d migrations\n", len(mig))
+	fmt.Printf("Executed %d migrations\n", len(execs))
 
-	for _, hmig := range mig {
-		if hmig.Execution != nil {
-			fmt.Printf("Executed Up() for %d migration\n", hmig.Execution.Version)
+	for _, execMig := range execs {
+		if execMig.Execution != nil {
+			fmt.Printf("Executed Up() for %d migration\n", execMig.Execution.Version)
 		}
 	}
 
 	return err
 }
 
-type MigrateDownCommand struct {
+type MigrateAllDownCommand struct {
 	handler *MigrationsHandler
 }
 
-func (c *MigrateDownCommand) Name() string {
-	return "down"
+func (c *MigrateAllDownCommand) Name() string {
+	return "all:down"
 }
 
-func (c *MigrateDownCommand) Description() string {
+func (c *MigrateAllDownCommand) Description() string {
 	return "Executes Down() for the all executed migrations"
 }
 
-func (c *MigrateDownCommand) Exec() error {
-	mig, err := c.handler.MigrateDown()
+func (c *MigrateAllDownCommand) Exec() error {
+	execs, err := c.handler.MigrateAllDown()
 
-	fmt.Printf("Executed %d migrations\n", len(mig))
+	fmt.Printf("Executed %d migrations\n", len(execs))
 
-	for _, hmig := range mig {
-		if hmig.Execution != nil {
-			fmt.Printf("Executed Down() for %d migration\n", hmig.Execution.Version)
+	for _, mig := range execs {
+		if mig.Execution != nil {
+			fmt.Printf("Executed Down() for %d migration\n", mig.Execution.Version)
 		}
 
 	}
@@ -235,28 +235,28 @@ func (c *MigrateStatsCommand) Description() string {
 }
 
 func (c *MigrateStatsCommand) Exec() error {
-	plan, err := NewExecutionPlan(c.registry, c.repository)
+	plan, err := NewPlan(c.registry, c.repository)
 
 	if plan != nil {
-		nextMigFile := "-"
-		prevMigFile := "-"
-		next := plan.Next()
-		prev := plan.Prev()
+		nextMigFile := "N/A"
+		lastMigFile := "N/A"
+		next := plan.NextToExecute()
+		prev := plan.LastExecuted().Migration
 
 		if next != nil {
 			nextMigFile = migration.FileNamePrefix + migration.FileNameSeparator +
 				strconv.Itoa(int(next.Version())) + ".go"
 		}
 		if prev != nil {
-			prevMigFile = migration.FileNamePrefix + migration.FileNameSeparator +
+			lastMigFile = migration.FileNamePrefix + migration.FileNameSeparator +
 				strconv.Itoa(int(prev.Version())) + ".go"
 		}
 
 		fmt.Println("")
 		fmt.Printf("Registered migrations count: %d\n", plan.RegisteredMigrationsCount())
-		fmt.Printf("Executions count: %d\n", plan.ExecutionsCount())
-		fmt.Printf("Next migration file: %s\n", nextMigFile)
-		fmt.Printf("Prev migration file: %s\n", prevMigFile)
+		fmt.Printf("Executions count: %d\n", plan.FinishedExecutionsCount())
+		fmt.Printf("NextToExecute migration file: %s\n", nextMigFile)
+		fmt.Printf("LastExecuted migration file: %s\n", lastMigFile)
 	}
 
 	return err
@@ -312,11 +312,12 @@ type MigrateForceUpCommand struct {
 }
 
 func (c *MigrateForceUpCommand) Name() string {
-	return "forceup"
+	return "force:up"
 }
 
 func (c *MigrateForceUpCommand) Description() string {
-	return "Executes Up() forcefully for the provided migration version"
+	return "Executes Up() forcefully for the provided migration version" +
+		" (even if it was executed before)"
 }
 
 func (c *MigrateForceUpCommand) Exec() error {
@@ -326,10 +327,10 @@ func (c *MigrateForceUpCommand) Exec() error {
 		return err
 	}
 
-	hmig, err := c.handler.ForceUp(migVersion)
+	exec, err := c.handler.ForceUp(migVersion)
 
-	if hmig.Execution != nil {
-		fmt.Printf("Executed Up() forcefully for %d migration\n", hmig.Execution.Version)
+	if exec.Execution != nil {
+		fmt.Printf("Executed Up() forcefully for %d migration\n", exec.Execution.Version)
 	} else {
 		fmt.Print("No migration executed\n")
 	}
@@ -343,11 +344,12 @@ type MigrateForceDownCommand struct {
 }
 
 func (c *MigrateForceDownCommand) Name() string {
-	return "forcedown"
+	return "force:down"
 }
 
 func (c *MigrateForceDownCommand) Description() string {
-	return "Executes Down() forcefully for the provided migration version"
+	return "Executes Down() forcefully for the provided migration version" +
+		" (even if it was executed before)"
 }
 
 func (c *MigrateForceDownCommand) Exec() error {
@@ -357,10 +359,10 @@ func (c *MigrateForceDownCommand) Exec() error {
 		return err
 	}
 
-	hmig, err := c.handler.ForceDown(migVersion)
+	exec, err := c.handler.ForceDown(migVersion)
 
-	if hmig.Execution != nil {
-		fmt.Printf("Executed Down() forcefully for %d migration\n", hmig.Execution.Version)
+	if exec.Execution != nil {
+		fmt.Printf("Executed Down() forcefully for %d migration\n", exec.Execution.Version)
 	} else {
 		fmt.Print("No migration executed\n")
 	}

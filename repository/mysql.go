@@ -15,7 +15,7 @@ type MysqlHandler struct {
 	ctx       context.Context
 }
 
-func NewDbHandle(dsn string) (*sql.DB, error) {
+func newDbHandle(dsn string) (*sql.DB, error) {
 	db, err := sql.Open("mysql", dsn)
 
 	if db == nil {
@@ -29,16 +29,18 @@ func NewDbHandle(dsn string) (*sql.DB, error) {
 	return db, err
 }
 
-// NewMysqlHandler db should be a standalone, dedicated connection object.
-// It should not be used by migration files.
-// Using db for executions repository and migrations may cause unexpected behaviour when database
-// locks or transactions are involved
 func NewMysqlHandler(
-	db *sql.DB,
+	dsn string,
 	tableName string,
 	ctx context.Context,
-) *MysqlHandler {
-	return &MysqlHandler{db, tableName, ctx}
+) (*MysqlHandler, error) {
+	db, err := newDbHandle(dsn)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &MysqlHandler{db, tableName, ctx}, nil
 }
 
 func (h *MysqlHandler) Context() context.Context {
