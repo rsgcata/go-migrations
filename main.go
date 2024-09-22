@@ -37,7 +37,7 @@ func main() {
 	migRegistry := migration.NewDirMigrationsRegistry(dirPath)
 	populateRegistry(migRegistry, ctx, dbDsn)
 
-	Bootstrap(os.Args[1:], migRegistry, repo, dirPath)
+	Bootstrap(os.Args, migRegistry, repo, dirPath, nil)
 }
 
 func getDbDsn() string {

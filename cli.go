@@ -23,8 +23,17 @@ func Bootstrap(
 	registry migration.MigrationsRegistry,
 	repository execution.Repository,
 	dirPath migration.MigrationsDirPath,
+	newHandler func(
+		registry migration.MigrationsRegistry,
+		repository execution.Repository,
+		newExecutionPlan ExecutionPlanBuilder,
+	) (*MigrationsHandler, error),
 ) {
-	handler, err := NewHandler(registry, repository, nil)
+	if newHandler == nil {
+		newHandler = NewHandler
+	}
+
+	handler, err := newHandler(registry, repository, nil)
 
 	if err != nil {
 		panic(
@@ -37,7 +46,7 @@ func Bootstrap(
 
 	inputCmd := "help"
 
-	if len(args) > 1 {
+	if len(args) >= 1 {
 		if args[0] == "--" {
 			args = args[1:]
 		}
@@ -183,7 +192,7 @@ func (c *MigrateAllUpCommand) Description() string {
 func (c *MigrateAllUpCommand) Exec() error {
 	execs, err := c.handler.MigrateAllUp()
 
-	fmt.Printf("Executed %d migrations\n", len(execs))
+	fmt.Printf("Executed Up() for %d migrations\n", len(execs))
 
 	for _, execMig := range execs {
 		if execMig.Execution != nil {
@@ -209,7 +218,7 @@ func (c *MigrateAllDownCommand) Description() string {
 func (c *MigrateAllDownCommand) Exec() error {
 	execs, err := c.handler.MigrateAllDown()
 
-	fmt.Printf("Executed %d migrations\n", len(execs))
+	fmt.Printf("Executed Down() for %d migrations\n", len(execs))
 
 	for _, mig := range execs {
 		if mig.Execution != nil {
@@ -255,8 +264,8 @@ func (c *MigrateStatsCommand) Exec() error {
 		fmt.Println("")
 		fmt.Printf("Registered migrations count: %d\n", plan.RegisteredMigrationsCount())
 		fmt.Printf("Executions count: %d\n", plan.FinishedExecutionsCount())
-		fmt.Printf("NextToExecute migration file: %s\n", nextMigFile)
-		fmt.Printf("LastExecuted migration file: %s\n", lastMigFile)
+		fmt.Printf("Next to execute migration file: %s\n", nextMigFile)
+		fmt.Printf("Last executed migration file: %s\n", lastMigFile)
 	}
 
 	return err
@@ -332,7 +341,7 @@ func (c *MigrateForceUpCommand) Exec() error {
 	if exec.Execution != nil {
 		fmt.Printf("Executed Up() forcefully for %d migration\n", exec.Execution.Version)
 	} else {
-		fmt.Print("No migration executed\n")
+		fmt.Print("No forced Up() migration executed\n")
 	}
 
 	return err
@@ -364,7 +373,7 @@ func (c *MigrateForceDownCommand) Exec() error {
 	if exec.Execution != nil {
 		fmt.Printf("Executed Down() forcefully for %d migration\n", exec.Execution.Version)
 	} else {
-		fmt.Print("No migration executed\n")
+		fmt.Print("No forced Down() migration executed\n")
 	}
 
 	return err

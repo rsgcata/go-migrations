@@ -567,25 +567,56 @@ func (suite *HandlerTestSuite) TestItCanMigrateUpNextAvailableMigration() {
 	}
 }
 
-func (suite *HandlerTestSuite) TestItFailsToMigrateUpNextWithMissingExecutionPlan() {
-	errMsg := "init failed"
-	registry := migration.NewGenericRegistry()
-	registeredMigration := &FakeUpMigration{DummyMigration: *migration.NewDummyMigration(1)}
-	_ = registry.Register(registeredMigration)
-	handler, _ := NewHandler(
-		registry, &RepoMock{
-			loadExecutions: func() ([]execution.MigrationExecution, error) {
-				return nil, errors.New(errMsg)
+func (suite *HandlerTestSuite) TestItCanHandleFailureWhenMigratingOneUp() {
+	scenarios := map[string]struct {
+		errMsg                  string
+		expectedUpRan           bool
+		expectedToHaveMigration bool
+		expectedToHaveExecution bool
+	}{
+		"missing execution plan":    {"init failed", false, false, false},
+		"failure to save execution": {"save failed", true, true, true},
+	}
+
+	for scenarioName, scenario := range scenarios {
+		registry := migration.NewGenericRegistry()
+		registeredMigration := &FakeUpMigration{
+			DummyMigration: *migration.NewDummyMigration(1),
+		}
+		_ = registry.Register(registeredMigration)
+
+		repoMock := &RepoMock{
+			save: func(execution execution.MigrationExecution) error {
+				return errors.New(scenario.errMsg)
 			},
-		}, nil,
-	)
-	handledMigration, err := handler.MigrateOneUp()
-	suite.Assert().False(registeredMigration.upRan)
-	suite.Assert().NotNil(handledMigration)
-	suite.Assert().NotNil(err)
-	suite.Assert().Nil(handledMigration.Execution)
-	suite.Assert().Nil(handledMigration.Migration)
-	suite.Assert().Contains(err.Error(), errMsg)
+		}
+
+		if !scenario.expectedToHaveExecution {
+			repoMock.loadExecutions = func() ([]execution.MigrationExecution, error) {
+				return nil, errors.New(scenario.errMsg)
+			}
+		}
+
+		handler, _ := NewHandler(registry, repoMock, nil)
+		handledMigration, err := handler.MigrateOneUp()
+		suite.Assert().Equal(
+			scenario.expectedUpRan, registeredMigration.upRan,
+			"failed scenario: %s", scenarioName,
+		)
+		suite.Assert().NotNil(err, "failed scenario: %s", scenarioName)
+		suite.Assert().Equal(
+			scenario.expectedToHaveExecution, handledMigration.Execution != nil,
+			"failed scenario: %s", scenarioName,
+		)
+		suite.Assert().Equal(
+			scenario.expectedToHaveMigration, handledMigration.Migration != nil,
+			"failed scenario: %s", scenarioName,
+		)
+		suite.Assert().Contains(
+			err.Error(), scenario.errMsg,
+			"failed scenario: %s", scenarioName,
+		)
+	}
 }
 
 func (suite *HandlerTestSuite) TestItCanMigrateAllUp() {

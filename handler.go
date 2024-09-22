@@ -143,6 +143,31 @@ type MigrationsHandler struct {
 	newExecutionPlan ExecutionPlanBuilder
 }
 
+func (handler *MigrationsHandler) New(
+	registry migration.MigrationsRegistry,
+	repository execution.Repository,
+	newExecutionPlan ExecutionPlanBuilder,
+) (*MigrationsHandler, error) {
+	err := repository.Init()
+
+	if err != nil {
+		return nil, fmt.Errorf(
+			"could not create new migrations handler,"+
+				" failed to initialize the repository with error: %w", err,
+		)
+	}
+
+	if newExecutionPlan == nil {
+		newExecutionPlan = NewPlan
+	}
+
+	return &MigrationsHandler{
+		registry:         registry,
+		repository:       repository,
+		newExecutionPlan: newExecutionPlan,
+	}, nil
+}
+
 func NewHandler(
 	registry migration.MigrationsRegistry,
 	repository execution.Repository,
