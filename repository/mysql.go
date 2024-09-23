@@ -15,7 +15,7 @@ type MysqlHandler struct {
 	ctx       context.Context
 }
 
-func newDbHandle(dsn string) (*sql.DB, error) {
+func newMysqlDbHandle(dsn string) (*sql.DB, error) {
 	db, err := sql.Open("mysql", dsn)
 
 	if db == nil {
@@ -34,7 +34,7 @@ func NewMysqlHandler(
 	tableName string,
 	ctx context.Context,
 ) (*MysqlHandler, error) {
-	db, err := newDbHandle(dsn)
+	db, err := newMysqlDbHandle(dsn)
 
 	if err != nil {
 		return nil, err

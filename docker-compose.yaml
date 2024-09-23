@@ -29,3 +29,17 @@ services:
     ports:
       - target: ${MYSQL_PORT}
         published: ${MYSQL_PORT}
+
+  mongo:
+    image: mongo:8.0.0-noble
+    container_name: mongo
+    environment:
+      APP_ENV: dev
+      MONGO_DATABASE: ${MONGO_DATABASE}
+      MONGO_PASSWORD: ${MONGO_PASSWORD}
+      MONGO_USER: ${MONGO_USER}
+      MONGO_DSN: ${MONGO_DSN}
+      MONGO_PORT: ${MONGO_PORT}
+    ports:
+      - target: ${MONGO_PORT}
+        published: ${MONGO_PORT}

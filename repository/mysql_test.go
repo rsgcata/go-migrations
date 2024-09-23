@@ -68,7 +68,7 @@ func (suite *MysqlTestSuite) TearDownTest() {
 }
 
 func (suite *MysqlTestSuite) TestItCanBuildMigrationsExclusiveDbHandle() {
-	handle, err := newDbHandle(suite.dsn)
+	handle, err := newMysqlDbHandle(suite.dsn)
 
 	suite.Assert().Nil(err)
 	suite.Assert().Equal(1, handle.Stats().MaxOpenConnections)
