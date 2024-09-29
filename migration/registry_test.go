@@ -95,7 +95,7 @@ func (suite *RegistryTestSuite) TestItCanCountRegisteredMigrations() {
 
 func (suite *RegistryTestSuite) TestItCanValidateAllDirMigrationsAreRegistered() {
 	migDir, _ := NewMigrationsDirPath(suite.migrationsDirPath)
-	dirRegistry := NewDirMigrationsRegistry(migDir)
+	dirRegistry := NewEmptyDirMigrationsRegistry(migDir)
 
 	for i := 1; i < 11; i++ {
 		newVersion := uint64(i)
@@ -116,7 +116,7 @@ func (suite *RegistryTestSuite) TestItCanValidateAllDirMigrationsAreRegistered()
 
 func (suite *RegistryTestSuite) TestItCanComputeExtraAndMissingRegisteredMigrations() {
 	migDir, _ := NewMigrationsDirPath(suite.migrationsDirPath)
-	dirRegistry := NewDirMigrationsRegistry(migDir)
+	dirRegistry := NewEmptyDirMigrationsRegistry(migDir)
 
 	for i := 1; i < 5; i++ {
 		newVersion := uint64(i)

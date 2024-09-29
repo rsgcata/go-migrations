@@ -1,43 +1,14 @@
-package main
+package handler
 
 import (
 	"errors"
 	"github.com/rsgcata/go-migrations/execution"
 	"github.com/rsgcata/go-migrations/migration"
 	"github.com/stretchr/testify/suite"
+	"slices"
 	"testing"
 	"time"
 )
-
-type RepoMock struct {
-	init           func() error
-	loadExecutions func() ([]execution.MigrationExecution, error)
-	save           func(execution execution.MigrationExecution) error
-	remove         func(execution execution.MigrationExecution) error
-	findOne        func(version uint64) (*execution.MigrationExecution, error)
-}
-
-func (rm *RepoMock) Init() error {
-	if rm.init == nil {
-		return nil
-	}
-	return rm.init()
-}
-func (rm *RepoMock) LoadExecutions() ([]execution.MigrationExecution, error) {
-	if rm.loadExecutions == nil {
-		return make([]execution.MigrationExecution, 0), nil
-	}
-	return rm.loadExecutions()
-}
-func (rm *RepoMock) Save(execution execution.MigrationExecution) error {
-	return rm.save(execution)
-}
-func (rm *RepoMock) Remove(execution execution.MigrationExecution) error {
-	return rm.remove(execution)
-}
-func (rm *RepoMock) FindOne(version uint64) (*execution.MigrationExecution, error) {
-	return rm.findOne(version)
-}
 
 type HandlerTestSuite struct {
 	suite.Suite
@@ -48,14 +19,13 @@ func TestHandlerTestSuite(t *testing.T) {
 }
 
 func (suite *HandlerTestSuite) TestItCanCreateExecutionPlan() {
-	repo := &RepoMock{
-		loadExecutions: func() ([]execution.MigrationExecution, error) {
-			return []execution.MigrationExecution{
-				{Version: 1, ExecutedAtMs: 2, FinishedAtMs: 3},
-				{Version: 2, ExecutedAtMs: 4, FinishedAtMs: 5},
-			}, nil
+	repo := &execution.InMemoryRepository{}
+	repo.SaveAll(
+		[]execution.MigrationExecution{
+			{Version: 1, ExecutedAtMs: 2, FinishedAtMs: 3},
+			{Version: 2, ExecutedAtMs: 4, FinishedAtMs: 5},
 		},
-	}
+	)
 
 	registry := migration.NewGenericRegistry()
 	_ = registry.Register(migration.NewDummyMigration(1))
@@ -110,11 +80,8 @@ func (suite *HandlerTestSuite) TestItFailsToCreateExecutionPlanFromInvalidState(
 	}
 
 	for scenarioName, scenarioData := range scenarios {
-		repo := &RepoMock{
-			loadExecutions: func() ([]execution.MigrationExecution, error) {
-				return scenarioData.persistedExecutions, nil
-			},
-		}
+		repo := &execution.InMemoryRepository{}
+		repo.SaveAll(scenarioData.persistedExecutions)
 
 		registry := migration.NewGenericRegistry()
 		for _, mig := range scenarioData.registeredMigrations {
@@ -134,11 +101,7 @@ func (suite *HandlerTestSuite) TestItFailsToCreateExecutionPlanFromInvalidState(
 
 func (suite *HandlerTestSuite) TestItFailsToCreateExecutionsPlanWhenLoadingFromRepoFails() {
 	loadErr := errors.New("load err")
-	repo := &RepoMock{
-		loadExecutions: func() ([]execution.MigrationExecution, error) {
-			return make([]execution.MigrationExecution, 0), loadErr
-		},
-	}
+	repo := &execution.InMemoryRepository{LoadErr: loadErr}
 	registry := migration.NewGenericRegistry()
 	_ = registry.Register(migration.NewDummyMigration(123))
 	plan, err := NewPlan(registry, repo)
@@ -193,11 +156,8 @@ func (suite *HandlerTestSuite) TestItCanGetNextMigrationFromExecutionPlan() {
 	}
 
 	for scenarioName, scenarioData := range scenarios {
-		repo := &RepoMock{
-			loadExecutions: func() ([]execution.MigrationExecution, error) {
-				return scenarioData.persistedExecutions, nil
-			},
-		}
+		repo := &execution.InMemoryRepository{}
+		repo.SaveAll(scenarioData.persistedExecutions)
 
 		registry := migration.NewGenericRegistry()
 		for _, mig := range scenarioData.registeredMigrations {
@@ -242,11 +202,8 @@ func (suite *HandlerTestSuite) TestItCanGetLastExecutedMigrationFromExecutionPla
 	}
 
 	for scenarioName, scenarioData := range scenarios {
-		repo := &RepoMock{
-			loadExecutions: func() ([]execution.MigrationExecution, error) {
-				return scenarioData.persistedExecutions, nil
-			},
-		}
+		repo := &execution.InMemoryRepository{}
+		repo.SaveAll(scenarioData.persistedExecutions)
 
 		registry := migration.NewGenericRegistry()
 		for _, mig := range scenarioData.registeredMigrations {
@@ -300,23 +257,19 @@ func (suite *HandlerTestSuite) TestItCanGetAllMigrationsToBeExecuted() {
 			_ = migrationsRegistry.Register(migration.NewDummyMigration(version))
 		}
 
-		plan, _ := NewPlan(
-			migrationsRegistry, &RepoMock{
-				loadExecutions: func() ([]execution.MigrationExecution, error) {
-					var executions []execution.MigrationExecution
-					for _, version := range scenarioData.finishedExecVersions {
-						exec := execution.StartExecution(migrationsRegistry.Get(version))
-						exec.FinishExecution()
-						executions = append(executions, *exec)
-					}
-					for _, version := range scenarioData.unfinishedExecVersions {
-						exec := execution.StartExecution(migrationsRegistry.Get(version))
-						executions = append(executions, *exec)
-					}
-					return executions, nil
-				},
-			},
-		)
+		var executions []execution.MigrationExecution
+		for _, version := range scenarioData.finishedExecVersions {
+			exec := execution.StartExecution(migrationsRegistry.Get(version))
+			exec.FinishExecution()
+			executions = append(executions, *exec)
+		}
+		for _, version := range scenarioData.unfinishedExecVersions {
+			exec := execution.StartExecution(migrationsRegistry.Get(version))
+			executions = append(executions, *exec)
+		}
+		repo := &execution.InMemoryRepository{}
+		repo.SaveAll(executions)
+		plan, _ := NewPlan(migrationsRegistry, repo)
 
 		var toBeExecutedVersions []uint64
 		for _, mig := range plan.AllToBeExecuted() {
@@ -361,23 +314,19 @@ func (suite *HandlerTestSuite) TestItCanGetAllExecutedMigrations() {
 			_ = migrationsRegistry.Register(migration.NewDummyMigration(version))
 		}
 
-		plan, _ := NewPlan(
-			migrationsRegistry, &RepoMock{
-				loadExecutions: func() ([]execution.MigrationExecution, error) {
-					var executions []execution.MigrationExecution
-					for _, version := range scenarioData.finishedExecVersions {
-						exec := execution.StartExecution(migrationsRegistry.Get(version))
-						exec.FinishExecution()
-						executions = append(executions, *exec)
-					}
-					for _, version := range scenarioData.unfinishedExecVersions {
-						exec := execution.StartExecution(migrationsRegistry.Get(version))
-						executions = append(executions, *exec)
-					}
-					return executions, nil
-				},
-			},
-		)
+		var executions []execution.MigrationExecution
+		for _, version := range scenarioData.finishedExecVersions {
+			exec := execution.StartExecution(migrationsRegistry.Get(version))
+			exec.FinishExecution()
+			executions = append(executions, *exec)
+		}
+		for _, version := range scenarioData.unfinishedExecVersions {
+			exec := execution.StartExecution(migrationsRegistry.Get(version))
+			executions = append(executions, *exec)
+		}
+		repo := &execution.InMemoryRepository{}
+		repo.SaveAll(executions)
+		plan, _ := NewPlan(migrationsRegistry, repo)
 
 		var executedVersions []uint64
 		for _, exec := range plan.AllExecuted() {
@@ -399,17 +348,15 @@ func (suite *HandlerTestSuite) TestItCanCountMigrationsAndFinishedExecutionsFrom
 	_ = registry.Register(migration.NewDummyMigration(2))
 	_ = registry.Register(migration.NewDummyMigration(3))
 
-	plan, _ := NewPlan(
-		registry, &RepoMock{
-			loadExecutions: func() ([]execution.MigrationExecution, error) {
-				return []execution.MigrationExecution{
-					{Version: 1, ExecutedAtMs: 2, FinishedAtMs: 3},
-					{Version: 2, ExecutedAtMs: 4, FinishedAtMs: 5},
-					{Version: 3, ExecutedAtMs: 4, FinishedAtMs: 0},
-				}, nil
-			},
+	repo := &execution.InMemoryRepository{}
+	repo.SaveAll(
+		[]execution.MigrationExecution{
+			{Version: 1, ExecutedAtMs: 2, FinishedAtMs: 3},
+			{Version: 2, ExecutedAtMs: 4, FinishedAtMs: 5},
+			{Version: 3, ExecutedAtMs: 4, FinishedAtMs: 0},
 		},
 	)
+	plan, _ := NewPlan(registry, repo)
 	suite.Assert().Equal(plan.RegisteredMigrationsCount(), 3)
 	suite.Assert().Equal(plan.FinishedExecutionsCount(), 2)
 }
@@ -417,15 +364,33 @@ func (suite *HandlerTestSuite) TestItCanCountMigrationsAndFinishedExecutionsFrom
 func (suite *HandlerTestSuite) TestItFailsToBuildHandlerWhenRepoInitializationFails() {
 	errMsg := "init failed"
 	handler, err := NewHandler(
-		migration.NewGenericRegistry(), &RepoMock{
-			init: func() error {
-				return errors.New(errMsg)
-			},
-		}, nil,
+		migration.NewGenericRegistry(),
+		&execution.InMemoryRepository{InitErr: errors.New(errMsg)},
+		nil,
 	)
 	suite.Assert().Nil(handler)
 	suite.Assert().NotNil(err)
 	suite.Assert().Contains(err.Error(), errMsg)
+}
+
+func (suite *HandlerTestSuite) TestItCanBuildNewNumOfRuns() {
+	scenarios := map[string]struct {
+		arg         string
+		expectedNum int
+	}{
+		"0":                 {"0", 1},
+		"all":               {"all", 99999},
+		"1":                 {"1", 1},
+		"-1":                {"-1", 1},
+		"9":                 {"9", 9},
+		"empty":             {"", 1},
+		"empty with spaces": {"", 1},
+	}
+
+	for _, scenario := range scenarios {
+		actualRuns, _ := NewNumOfRuns(scenario.arg)
+		suite.Assert().Equal(int(actualRuns), scenario.expectedNum)
+	}
 }
 
 type FakeUpMigration struct {
@@ -444,130 +409,7 @@ func (f *FakeUpMigration) Down() error {
 	return nil
 }
 
-func (suite *HandlerTestSuite) TestItCanMigrateUpNextAvailableMigration() {
-	scenarios := map[string]struct {
-		availableMigrations []migration.Migration
-		initialExecutions   []execution.MigrationExecution
-		expectedVersion     uint64
-	}{
-		"empty migrations registry": {
-			availableMigrations: []migration.Migration{},
-			initialExecutions:   []execution.MigrationExecution{},
-		},
-		"multiple registry entries and no executions": {
-			availableMigrations: []migration.Migration{
-				&FakeUpMigration{DummyMigration: *migration.NewDummyMigration(1)},
-				&FakeUpMigration{DummyMigration: *migration.NewDummyMigration(2)},
-			},
-			initialExecutions: []execution.MigrationExecution{},
-			expectedVersion:   1,
-		},
-		"multiple registry entries and some executions": {
-			availableMigrations: []migration.Migration{
-				&FakeUpMigration{DummyMigration: *migration.NewDummyMigration(1)},
-				&FakeUpMigration{DummyMigration: *migration.NewDummyMigration(2)},
-				&FakeUpMigration{DummyMigration: *migration.NewDummyMigration(3)},
-				&FakeUpMigration{DummyMigration: *migration.NewDummyMigration(4)},
-			},
-			initialExecutions: []execution.MigrationExecution{
-				{Version: 1, ExecutedAtMs: 123, FinishedAtMs: 124},
-				{Version: 2, ExecutedAtMs: 125, FinishedAtMs: 126},
-			},
-			expectedVersion: 3,
-		},
-		"multiple registry entries and unfinished execution": {
-			availableMigrations: []migration.Migration{
-				&FakeUpMigration{DummyMigration: *migration.NewDummyMigration(1)},
-				&FakeUpMigration{DummyMigration: *migration.NewDummyMigration(2)},
-				&FakeUpMigration{DummyMigration: *migration.NewDummyMigration(3)},
-			},
-			initialExecutions: []execution.MigrationExecution{
-				{Version: 1, ExecutedAtMs: 123, FinishedAtMs: 124},
-				{Version: 2, ExecutedAtMs: 125, FinishedAtMs: 0},
-			},
-			expectedVersion: 2,
-		},
-		"all migrations executed": {
-			availableMigrations: []migration.Migration{
-				&FakeUpMigration{DummyMigration: *migration.NewDummyMigration(1)},
-				&FakeUpMigration{DummyMigration: *migration.NewDummyMigration(2)},
-				&FakeUpMigration{DummyMigration: *migration.NewDummyMigration(3)},
-			},
-			initialExecutions: []execution.MigrationExecution{
-				{Version: 1, ExecutedAtMs: 123, FinishedAtMs: 124},
-				{Version: 2, ExecutedAtMs: 125, FinishedAtMs: 126},
-				{Version: 3, ExecutedAtMs: 127, FinishedAtMs: 128},
-			},
-		},
-	}
-
-	buildRegistry := func(migrations []migration.Migration) *migration.GenericRegistry {
-		registry := migration.NewGenericRegistry()
-		for _, mig := range migrations {
-			_ = registry.Register(mig)
-		}
-		return registry
-	}
-
-	for name, scenario := range scenarios {
-		repoMock := &RepoMock{
-			loadExecutions: func() ([]execution.MigrationExecution, error) {
-				return scenario.initialExecutions, nil
-			},
-			save: func(execution execution.MigrationExecution) error {
-				if scenario.expectedVersion == 0 {
-					suite.Failf("no executions should be saved for scenario: %s", name)
-				} else {
-					suite.Assert().Equal(
-						scenario.expectedVersion, execution.Version,
-						"failed scenario: %s", name,
-					)
-				}
-				return nil
-			},
-		}
-		handler, _ := NewHandler(
-			buildRegistry(scenario.availableMigrations), repoMock, nil,
-		)
-		timeBefore := uint64(time.Now().UnixMilli())
-		handledMigration, err := handler.MigrateOneUp()
-		timeAfter := uint64(time.Now().UnixMilli())
-
-		suite.Assert().NoError(err)
-
-		if scenario.expectedVersion == 0 {
-			suite.Assert().Nil(handledMigration.Migration, "failed scenario: %s", name)
-			suite.Assert().Nil(handledMigration.Execution, "failed scenario: %s", name)
-		} else {
-			suite.Assert().Equal(
-				scenario.expectedVersion,
-				handledMigration.Migration.Version(),
-				"failed scenario: %s", name,
-			)
-			suite.Assert().Equal(
-				scenario.expectedVersion,
-				handledMigration.Execution.Version,
-				"failed scenario: %s", name,
-			)
-			suite.Assert().True(
-				handledMigration.Migration.(*FakeUpMigration).upRan, "failed scenario: %s", name,
-			)
-			suite.Assert().True(
-				handledMigration.Execution.Finished(), "failed scenario: %s", name,
-			)
-			suite.Assert().True(
-				timeBefore <= handledMigration.Execution.ExecutedAtMs,
-				"failed scenario: %s", name,
-			)
-			suite.Assert().True(
-				timeAfter >= handledMigration.Execution.FinishedAtMs,
-				"failed scenario: %s", name,
-			)
-		}
-	}
-}
-
-func (suite *HandlerTestSuite) TestItCanHandleFailureWhenMigratingOneUp() {
+func (suite *HandlerTestSuite) TestItCanHandleFailureWhenMigratingUp() {
 	scenarios := map[string]struct {
 		errMsg                  string
 		expectedUpRan           bool
@@ -585,20 +427,19 @@ func (suite *HandlerTestSuite) TestItCanHandleFailureWhenMigratingOneUp() {
 		}
 		_ = registry.Register(registeredMigration)
 
-		repoMock := &RepoMock{
-			save: func(execution execution.MigrationExecution) error {
-				return errors.New(scenario.errMsg)
-			},
+		repoMock := &execution.InMemoryRepository{
+			SaveErr: errors.New(scenario.errMsg),
 		}
 
 		if !scenario.expectedToHaveExecution {
-			repoMock.loadExecutions = func() ([]execution.MigrationExecution, error) {
-				return nil, errors.New(scenario.errMsg)
-			}
+			repoMock.LoadErr = errors.New(scenario.errMsg)
 		}
 
 		handler, _ := NewHandler(registry, repoMock, nil)
-		handledMigration, err := handler.MigrateOneUp()
+		numOfRuns, _ := NewNumOfRuns("all")
+		handledMigrations, err := handler.MigrateUp(numOfRuns)
+		handledMigrations = append(handledMigrations, ExecutedMigration{})
+		handledMigration := handledMigrations[0]
 		suite.Assert().Equal(
 			scenario.expectedUpRan, registeredMigration.upRan,
 			"failed scenario: %s", scenarioName,
@@ -619,15 +460,19 @@ func (suite *HandlerTestSuite) TestItCanHandleFailureWhenMigratingOneUp() {
 	}
 }
 
-func (suite *HandlerTestSuite) TestItCanMigrateAllUp() {
+func (suite *HandlerTestSuite) TestItCanMigrateUp() {
+	allRuns, _ := NewNumOfRuns("all")
+	someRuns, _ := NewNumOfRuns("2")
 	scenarios := map[string]struct {
 		availableMigrations []migration.Migration
 		initialExecutions   []execution.MigrationExecution
 		expectedVersions    []uint64
+		numOfRuns           NumOfRuns
 	}{
 		"empty migrations registry": {
 			availableMigrations: []migration.Migration{},
 			initialExecutions:   []execution.MigrationExecution{},
+			numOfRuns:           allRuns,
 		},
 		"multiple registry entries and no executions": {
 			availableMigrations: []migration.Migration{
@@ -636,6 +481,7 @@ func (suite *HandlerTestSuite) TestItCanMigrateAllUp() {
 			},
 			initialExecutions: []execution.MigrationExecution{},
 			expectedVersions:  []uint64{1, 2},
+			numOfRuns:         allRuns,
 		},
 		"multiple registry entries and some executions": {
 			availableMigrations: []migration.Migration{
@@ -649,6 +495,7 @@ func (suite *HandlerTestSuite) TestItCanMigrateAllUp() {
 				{Version: 2, ExecutedAtMs: 125, FinishedAtMs: 126},
 			},
 			expectedVersions: []uint64{3, 4},
+			numOfRuns:        allRuns,
 		},
 		"multiple registry entries and unfinished execution": {
 			availableMigrations: []migration.Migration{
@@ -661,6 +508,7 @@ func (suite *HandlerTestSuite) TestItCanMigrateAllUp() {
 				{Version: 2, ExecutedAtMs: 125, FinishedAtMs: 0},
 			},
 			expectedVersions: []uint64{2, 3},
+			numOfRuns:        allRuns,
 		},
 		"all migrations executed": {
 			availableMigrations: []migration.Migration{
@@ -673,6 +521,16 @@ func (suite *HandlerTestSuite) TestItCanMigrateAllUp() {
 				{Version: 2, ExecutedAtMs: 125, FinishedAtMs: 126},
 				{Version: 3, ExecutedAtMs: 127, FinishedAtMs: 128},
 			},
+			numOfRuns: allRuns,
+		},
+		"run only some migrations": {
+			availableMigrations: []migration.Migration{
+				&FakeUpMigration{DummyMigration: *migration.NewDummyMigration(1)},
+				&FakeUpMigration{DummyMigration: *migration.NewDummyMigration(2)},
+				&FakeUpMigration{DummyMigration: *migration.NewDummyMigration(3)},
+			},
+			expectedVersions: []uint64{1, 2},
+			numOfRuns:        someRuns,
 		},
 	}
 
@@ -685,21 +543,14 @@ func (suite *HandlerTestSuite) TestItCanMigrateAllUp() {
 	}
 
 	for name, scenario := range scenarios {
-		var savedExecutions []uint64
-		repoMock := &RepoMock{
-			loadExecutions: func() ([]execution.MigrationExecution, error) {
-				return scenario.initialExecutions, nil
-			},
-			save: func(execution execution.MigrationExecution) error {
-				savedExecutions = append(savedExecutions, execution.Version)
-				return nil
-			},
-		}
+		repo := &execution.InMemoryRepository{}
+		repo.SaveAll(scenario.initialExecutions)
+
 		handler, _ := NewHandler(
-			buildRegistry(scenario.availableMigrations), repoMock, nil,
+			buildRegistry(scenario.availableMigrations), repo, nil,
 		)
 		timeBefore := uint64(time.Now().UnixMilli())
-		handledMigrations, err := handler.MigrateAllUp()
+		handledMigrations, err := handler.MigrateUp(scenario.numOfRuns)
 		timeAfter := uint64(time.Now().UnixMilli())
 
 		var uppedVersions []uint64
@@ -728,39 +579,146 @@ func (suite *HandlerTestSuite) TestItCanMigrateAllUp() {
 			)
 		}
 
-		suite.Assert().NoError(err)
-		suite.Assert().Equal(scenario.expectedVersions, uppedVersions)
+		suite.Assert().NoError(err, "failed scenario: %s", name)
+		suite.Assert().Equal(
+			scenario.expectedVersions, uppedVersions,
+			"failed scenario: %s", name,
+		)
+
+		var savedExecutions []uint64
+		for _, saved := range repo.PersistedExecutions[len(scenario.initialExecutions):] {
+			savedExecutions = append(savedExecutions, saved.Version)
+		}
+		suite.Assert().Equal(
+			scenario.expectedVersions, savedExecutions,
+			"failed scenario: %s", name,
+		)
 	}
 }
 
-func (suite *HandlerTestSuite) TestItCanMigrateOneDown() {
-	registry := migration.NewGenericRegistry()
-	_ = registry.Register(&FakeUpMigration{DummyMigration: *migration.NewDummyMigration(1)})
-	_ = registry.Register(&FakeUpMigration{DummyMigration: *migration.NewDummyMigration(2)})
-	_ = registry.Register(&FakeUpMigration{DummyMigration: *migration.NewDummyMigration(3)})
-
-	initialExecutions := []execution.MigrationExecution{
-		{Version: 1, ExecutedAtMs: 123, FinishedAtMs: 124},
-		{Version: 2, ExecutedAtMs: 125, FinishedAtMs: 0},
+func (suite *HandlerTestSuite) TestItCanMigrateDown() {
+	allRuns, _ := NewNumOfRuns("all")
+	someRuns, _ := NewNumOfRuns("2")
+	scenarios := map[string]struct {
+		availableMigrations []migration.Migration
+		initialExecutions   []execution.MigrationExecution
+		expectedVersions    []uint64
+		numOfRuns           NumOfRuns
+	}{
+		"empty migrations registry": {
+			availableMigrations: []migration.Migration{},
+			initialExecutions:   []execution.MigrationExecution{},
+			numOfRuns:           allRuns,
+		},
+		"multiple registry entries and no executions": {
+			availableMigrations: []migration.Migration{
+				&FakeUpMigration{DummyMigration: *migration.NewDummyMigration(1)},
+				&FakeUpMigration{DummyMigration: *migration.NewDummyMigration(2)},
+			},
+			initialExecutions: []execution.MigrationExecution{},
+			numOfRuns:         allRuns,
+		},
+		"multiple registry entries and some executions": {
+			availableMigrations: []migration.Migration{
+				&FakeUpMigration{DummyMigration: *migration.NewDummyMigration(1)},
+				&FakeUpMigration{DummyMigration: *migration.NewDummyMigration(2)},
+				&FakeUpMigration{DummyMigration: *migration.NewDummyMigration(3)},
+				&FakeUpMigration{DummyMigration: *migration.NewDummyMigration(4)},
+			},
+			initialExecutions: []execution.MigrationExecution{
+				{Version: 1, ExecutedAtMs: 123, FinishedAtMs: 124},
+				{Version: 2, ExecutedAtMs: 125, FinishedAtMs: 126},
+			},
+			expectedVersions: []uint64{2, 1},
+			numOfRuns:        allRuns,
+		},
+		"multiple registry entries and unfinished execution": {
+			availableMigrations: []migration.Migration{
+				&FakeUpMigration{DummyMigration: *migration.NewDummyMigration(1)},
+				&FakeUpMigration{DummyMigration: *migration.NewDummyMigration(2)},
+				&FakeUpMigration{DummyMigration: *migration.NewDummyMigration(3)},
+			},
+			initialExecutions: []execution.MigrationExecution{
+				{Version: 1, ExecutedAtMs: 123, FinishedAtMs: 124},
+				{Version: 2, ExecutedAtMs: 125, FinishedAtMs: 0},
+			},
+			expectedVersions: []uint64{2, 1},
+			numOfRuns:        allRuns,
+		},
+		"all migrations executed": {
+			availableMigrations: []migration.Migration{
+				&FakeUpMigration{DummyMigration: *migration.NewDummyMigration(1)},
+				&FakeUpMigration{DummyMigration: *migration.NewDummyMigration(2)},
+				&FakeUpMigration{DummyMigration: *migration.NewDummyMigration(3)},
+			},
+			initialExecutions: []execution.MigrationExecution{
+				{Version: 1, ExecutedAtMs: 123, FinishedAtMs: 124},
+				{Version: 2, ExecutedAtMs: 125, FinishedAtMs: 126},
+				{Version: 3, ExecutedAtMs: 127, FinishedAtMs: 128},
+			},
+			expectedVersions: []uint64{3, 2, 1},
+			numOfRuns:        allRuns,
+		},
+		"run only some migrations": {
+			availableMigrations: []migration.Migration{
+				&FakeUpMigration{DummyMigration: *migration.NewDummyMigration(1)},
+				&FakeUpMigration{DummyMigration: *migration.NewDummyMigration(2)},
+				&FakeUpMigration{DummyMigration: *migration.NewDummyMigration(3)},
+			},
+			initialExecutions: []execution.MigrationExecution{
+				{Version: 1, ExecutedAtMs: 123, FinishedAtMs: 124},
+				{Version: 2, ExecutedAtMs: 125, FinishedAtMs: 126},
+				{Version: 3, ExecutedAtMs: 127, FinishedAtMs: 128},
+			},
+			expectedVersions: []uint64{3, 2},
+			numOfRuns:        someRuns,
+		},
 	}
 
-	expectedExec := initialExecutions[1]
-
-	repoMock := &RepoMock{
-		loadExecutions: func() ([]execution.MigrationExecution, error) {
-			return initialExecutions, nil
-		},
-		remove: func(execution execution.MigrationExecution) error {
-			suite.Assert().Equal(expectedExec.Version, execution.Version)
-			return nil
-		},
+	buildRegistry := func(migrations []migration.Migration) *migration.GenericRegistry {
+		registry := migration.NewGenericRegistry()
+		for _, mig := range migrations {
+			_ = registry.Register(mig)
+		}
+		return registry
 	}
 
-	handler, _ := NewHandler(registry, repoMock, nil)
-	execMig, err := handler.MigrateOneDown()
+	for name, scenario := range scenarios {
+		repo := &execution.InMemoryRepository{}
+		repo.SaveAll(scenario.initialExecutions)
+		handler, _ := NewHandler(
+			buildRegistry(scenario.availableMigrations), repo, nil,
+		)
+		handledMigrations, err := handler.MigrateDown(scenario.numOfRuns)
 
-	suite.Assert().Nil(err)
-	suite.Assert().Equal(expectedExec.Version, execMig.Migration.Version())
-	suite.Assert().True(execMig.Migration.(*FakeUpMigration).downRan)
-	suite.Assert().Equal(execMig.Migration.Version(), execMig.Execution.Version)
+		var downVersions []uint64
+		for _, mig := range handledMigrations {
+			downVersions = append(downVersions, mig.Migration.Version())
+			suite.Assert().Equal(
+				mig.Migration.Version(),
+				mig.Execution.Version,
+				"failed scenario: %s", name,
+			)
+			suite.Assert().True(
+				mig.Migration.(*FakeUpMigration).downRan,
+				"failed scenario: %s", name,
+			)
+		}
+
+		suite.Assert().NoError(err, "failed scenario: %s", name)
+		suite.Assert().Equal(
+			scenario.expectedVersions, downVersions,
+			"failed scenario: %s", name,
+		)
+
+		var removedExecutions []uint64
+		for _, removed := range scenario.initialExecutions[len(repo.PersistedExecutions):] {
+			removedExecutions = append(removedExecutions, removed.Version)
+		}
+		slices.Reverse(removedExecutions)
+		suite.Assert().Equal(
+			scenario.expectedVersions, removedExecutions,
+			"failed scenario: %s", name,
+		)
+	}
 }

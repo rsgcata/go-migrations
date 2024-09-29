@@ -51,3 +51,51 @@ type Repository interface {
 	// FindOne Must find a migration execution using the version as filter
 	FindOne(version uint64) (*MigrationExecution, error)
 }
+
+type InMemoryRepository struct {
+	InitErr             error
+	LoadErr             error
+	SaveErr             error
+	RemoveErr           error
+	FindOneErr          error
+	PersistedExecutions []MigrationExecution
+}
+
+func (repo *InMemoryRepository) Init() error {
+	return repo.InitErr
+}
+
+func (repo *InMemoryRepository) LoadExecutions() ([]MigrationExecution, error) {
+	return repo.PersistedExecutions, repo.LoadErr
+}
+
+func (repo *InMemoryRepository) Save(execution MigrationExecution) error {
+	repo.PersistedExecutions = append(repo.PersistedExecutions, execution)
+	return repo.SaveErr
+}
+
+func (repo *InMemoryRepository) Remove(execution MigrationExecution) error {
+	var newPersistedExecutions []MigrationExecution
+	for _, e := range repo.PersistedExecutions {
+		if e.Version != execution.Version {
+			newPersistedExecutions = append(newPersistedExecutions, e)
+		}
+	}
+	repo.PersistedExecutions = newPersistedExecutions
+	return repo.RemoveErr
+}
+
+func (repo *InMemoryRepository) FindOne(version uint64) (*MigrationExecution, error) {
+	for _, e := range repo.PersistedExecutions {
+		if e.Version == version {
+			return &e, repo.FindOneErr
+		}
+	}
+	return nil, repo.FindOneErr
+}
+
+func (repo *InMemoryRepository) SaveAll(executions []MigrationExecution) {
+	for _, execution := range executions {
+		_ = repo.Save(execution)
+	}
+}

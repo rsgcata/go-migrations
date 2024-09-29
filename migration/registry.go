@@ -99,10 +99,33 @@ type DirMigrationsRegistry struct {
 	dirPath MigrationsDirPath
 }
 
-// NewDirMigrationsRegistry builds a migrations registry with all migrations available
-// in the specified directory.
-func NewDirMigrationsRegistry(dirPath MigrationsDirPath) *DirMigrationsRegistry {
+// NewEmptyDirMigrationsRegistry builds an empty migrations registry which can be used
+// for the use case where migrations are saved in a directory.
+func NewEmptyDirMigrationsRegistry(dirPath MigrationsDirPath) *DirMigrationsRegistry {
 	return &DirMigrationsRegistry{*NewGenericRegistry(), dirPath}
+}
+
+// NewDirMigrationsRegistry builds a migrations registry with all migrations available
+// in the specified directory. Panics if it detects that allMigrations argument does not
+// match with whatever migration files exist in the specified dirPath
+func NewDirMigrationsRegistry(
+	dirPath MigrationsDirPath,
+	allMigrations []Migration,
+) *DirMigrationsRegistry {
+	migRegistry := NewEmptyDirMigrationsRegistry(dirPath)
+
+	for _, mig := range allMigrations {
+		if regErr := migRegistry.Register(mig); regErr != nil {
+			panic(
+				fmt.Errorf(
+					"failed to register migration %d: %w", mig.Version(), regErr,
+				),
+			)
+		}
+	}
+
+	migRegistry.AssertValidRegistry()
+	return migRegistry
 }
 
 // HasAllMigrationsRegistered checks if everything from the migrations directory has been
@@ -151,4 +174,25 @@ func (registry *DirMigrationsRegistry) HasAllMigrationsRegistered() (
 	}
 
 	return len(missing) == 0 && len(extra) == 0, missing, extra, nil
+}
+
+// AssertValidRegistry checks if there are any issues with the list of registered
+// migrations and panics if it finds any
+func (registry *DirMigrationsRegistry) AssertValidRegistry() {
+	allRegistered, notRegistered, extraRegistered, registryErr :=
+		registry.HasAllMigrationsRegistered()
+
+	if registryErr != nil {
+		panic(fmt.Errorf("registry has invalid state: %w", registryErr))
+	}
+
+	if !allRegistered {
+		panic(
+			fmt.Errorf(
+				"registry has invalid state. Not registered: %s. Extra migrations: %s",
+				strings.Join(notRegistered, ", "),
+				strings.Join(extraRegistered, ", "),
+			),
+		)
+	}
 }

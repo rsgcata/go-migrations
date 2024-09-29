@@ -1,7 +1,8 @@
-package main
+package cli
 
 import (
 	"errors"
+	"github.com/rsgcata/go-migrations/execution"
 	"github.com/rsgcata/go-migrations/migration"
 	"github.com/stretchr/testify/suite"
 	"io"
@@ -19,10 +20,8 @@ func TestCliTestSuite(t *testing.T) {
 
 func (suite *CliTestSuite) TestItFailsToBootstrapCliWhenMigrationsHandlerInitFails() {
 	expectedErr := errors.New("init failed")
-	repo := &RepoMock{
-		init: func() error {
-			return expectedErr
-		},
+	repo := &execution.InMemoryRepository{
+		InitErr: expectedErr,
 	}
 
 	defer func() {
@@ -41,14 +40,12 @@ func (suite *CliTestSuite) TestItCanRunTheGivenCommand() {
 		inputArgs      []string
 		expectedOutput string
 	}{
-		"help default":              {[]string{"aaaa"}, helpCmdOutput},
-		"help default with go run":  {[]string{"--", "aaaa"}, helpCmdOutput},
+		"help default":              {[]string{"test123"}, helpCmdOutput},
+		"help default with go run":  {[]string{"--", "test123"}, helpCmdOutput},
 		"help explicit":             {[]string{"help"}, helpCmdOutput},
 		"help explicit with go run": {[]string{"--", "help"}, helpCmdOutput},
-		"one up explicit":           {[]string{"one:up"}, "No migration Up()"},
-		"one down explicit":         {[]string{"one:down"}, "No migration Down()"},
-		"all up explicit":           {[]string{"all:up"}, "Executed Up() for 0 migrations"},
-		"all down explicit":         {[]string{"all:down"}, "Executed Down() for 0 migrations"},
+		"up explicit":               {[]string{"up"}, "Executed Up() for 0 migrations"},
+		"down explicit":             {[]string{"down"}, "Executed Down() for 0 migrations"},
 		"force up up explicit": {
 			[]string{"force:up", "123"},
 			"No forced Up() migration executed",
@@ -65,8 +62,14 @@ func (suite *CliTestSuite) TestItCanRunTheGivenCommand() {
 		os.Stdout = w
 
 		migPath, _ := migration.NewMigrationsDirPath(suite.T().TempDir())
-		registry := migration.NewDirMigrationsRegistry(migPath)
-		Bootstrap(scenario.inputArgs, registry, &RepoMock{}, migPath, nil)
+		registry := migration.NewEmptyDirMigrationsRegistry(migPath)
+		Bootstrap(
+			scenario.inputArgs,
+			registry,
+			&execution.InMemoryRepository{},
+			migPath,
+			nil,
+		)
 
 		_ = w.Close()
 		actualOutput, _ := io.ReadAll(r)

@@ -1,8 +1,9 @@
-package main
+package cli
 
 import (
 	"errors"
 	"fmt"
+	"github.com/rsgcata/go-migrations/handler"
 	"os"
 	"sort"
 	"strconv"
@@ -26,20 +27,20 @@ func Bootstrap(
 	newHandler func(
 		registry migration.MigrationsRegistry,
 		repository execution.Repository,
-		newExecutionPlan ExecutionPlanBuilder,
-	) (*MigrationsHandler, error),
+		newExecutionPlan handler.ExecutionPlanBuilder,
+	) (*handler.MigrationsHandler, error),
 ) {
 	if newHandler == nil {
-		newHandler = NewHandler
+		newHandler = handler.NewHandler
 	}
 
-	handler, err := newHandler(registry, repository, nil)
+	migrationsHandler, err := newHandler(registry, repository, nil)
 
 	if err != nil {
 		panic(
 			fmt.Errorf(
 				"coult not bootstrap cli, %s: %w",
-				"failed to create new migrations handler with error", err,
+				"failed to create new migrations migrationsHandler with error", err,
 			),
 		)
 	}
@@ -56,16 +57,12 @@ func Bootstrap(
 
 	availableCommands := make(map[string]Command)
 
-	oneUp := &MigrateOneDownCommand{handler: handler}
-	oneDown := &MigrateOneUpCommand{handler: handler}
-	allUp := &MigrateAllUpCommand{handler: handler}
-	allDown := &MigrateAllDownCommand{handler: handler}
-	forceUp := &MigrateForceUpCommand{handler: handler, args: args}
-	forceDown := &MigrateForceDownCommand{handler: handler, args: args}
+	allUp := &MigrateUpCommand{handler: migrationsHandler, args: args}
+	allDown := &MigrateDownCommand{handler: migrationsHandler, args: args}
+	forceUp := &MigrateForceUpCommand{handler: migrationsHandler, args: args}
+	forceDown := &MigrateForceDownCommand{handler: migrationsHandler, args: args}
 	stats := &MigrateStatsCommand{registry: registry, repository: repository}
 	blank := &GenerateBlankMigrationCommand{dirPath}
-	availableCommands[oneUp.Name()] = oneUp
-	availableCommands[oneDown.Name()] = oneDown
 	availableCommands[allUp.Name()] = allUp
 	availableCommands[allDown.Name()] = allDown
 	availableCommands[forceUp.Name()] = forceUp
@@ -129,69 +126,38 @@ func (c *HelpCommand) Exec() error {
 	return nil
 }
 
-type MigrateOneDownCommand struct {
-	handler *MigrationsHandler
+type MigrateUpCommand struct {
+	handler *handler.MigrationsHandler
+	args    []string
 }
 
-func (c *MigrateOneDownCommand) Name() string {
-	return "one:down"
+func (c *MigrateUpCommand) Name() string {
+	return "up"
 }
 
-func (c *MigrateOneDownCommand) Description() string {
-	return "Executes Down() for the last executed migration"
+func (c *MigrateUpCommand) Description() string {
+	return "Executes Up() for the specified number of registered and not yet executed migrations." +
+		" If the number of migrations to execute is not specified, defaults to 1. Allowed" +
+		" values for the number of migrations to run Up(): \"all\", alias for 99999 and a valid" +
+		" integer greater than 0"
 }
 
-func (c *MigrateOneDownCommand) Exec() error {
-	execMig, err := c.handler.MigrateOneDown()
+func (c *MigrateUpCommand) Exec() error {
+	var numOfRuns handler.NumOfRuns
+	var argErr error
 
-	if execMig.Execution != nil {
-		fmt.Printf("Executed Down() for %d migration\n", execMig.Execution.Version)
+	if len(c.args) < 2 {
+		numOfRuns, argErr = handler.NewNumOfRuns("1")
 	} else {
-		fmt.Print("No migration Down() executed\n")
+		numOfRuns, argErr = handler.NewNumOfRuns(c.args[1])
 	}
 
-	return err
-}
-
-type MigrateOneUpCommand struct {
-	handler *MigrationsHandler
-}
-
-func (c *MigrateOneUpCommand) Name() string {
-	return "one:up"
-}
-
-func (c *MigrateOneUpCommand) Description() string {
-	return "Executes Up() for the next registered and not yet executed migration"
-}
-
-func (c *MigrateOneUpCommand) Exec() error {
-	execMig, err := c.handler.MigrateOneUp()
-
-	if execMig.Execution != nil {
-		fmt.Printf("Executed Up() for %d migration\n", execMig.Migration.Version())
-	} else {
-		fmt.Print("No migration Up() executed\n")
+	if argErr != nil {
+		fmt.Printf("Failed to execute Up(). %s\n", argErr)
+		return argErr
 	}
 
-	return err
-}
-
-type MigrateAllUpCommand struct {
-	handler *MigrationsHandler
-}
-
-func (c *MigrateAllUpCommand) Name() string {
-	return "all:up"
-}
-
-func (c *MigrateAllUpCommand) Description() string {
-	return "Executes Up() for the all registered and not yet executed migrations"
-}
-
-func (c *MigrateAllUpCommand) Exec() error {
-	execs, err := c.handler.MigrateAllUp()
-
+	execs, err := c.handler.MigrateUp(numOfRuns)
 	fmt.Printf("Executed Up() for %d migrations\n", len(execs))
 
 	for _, execMig := range execs {
@@ -203,20 +169,38 @@ func (c *MigrateAllUpCommand) Exec() error {
 	return err
 }
 
-type MigrateAllDownCommand struct {
-	handler *MigrationsHandler
+type MigrateDownCommand struct {
+	handler *handler.MigrationsHandler
+	args    []string
 }
 
-func (c *MigrateAllDownCommand) Name() string {
-	return "all:down"
+func (c *MigrateDownCommand) Name() string {
+	return "down"
 }
 
-func (c *MigrateAllDownCommand) Description() string {
-	return "Executes Down() for the all executed migrations"
+func (c *MigrateDownCommand) Description() string {
+	return "Executes Down() for the specified number of executed migrations." +
+		" If the number of executions is not specified, defaults to 1. Allowed" +
+		" values for the number of migrations to run Down(): \"all\", alias for 99999 and a valid" +
+		" integer greater than 0"
 }
 
-func (c *MigrateAllDownCommand) Exec() error {
-	execs, err := c.handler.MigrateAllDown()
+func (c *MigrateDownCommand) Exec() error {
+	var numOfRuns handler.NumOfRuns
+	var argErr error
+
+	if len(c.args) < 2 {
+		numOfRuns, argErr = handler.NewNumOfRuns("1")
+	} else {
+		numOfRuns, argErr = handler.NewNumOfRuns(c.args[1])
+	}
+
+	if argErr != nil {
+		fmt.Printf("Failed to execute Down(). %s\n", argErr)
+		return argErr
+	}
+
+	execs, err := c.handler.MigrateDown(numOfRuns)
 
 	fmt.Printf("Executed Down() for %d migrations\n", len(execs))
 
@@ -244,7 +228,7 @@ func (c *MigrateStatsCommand) Description() string {
 }
 
 func (c *MigrateStatsCommand) Exec() error {
-	plan, err := NewPlan(c.registry, c.repository)
+	plan, err := handler.NewPlan(c.registry, c.repository)
 
 	if plan != nil {
 		nextMigFile := "N/A"
@@ -316,7 +300,7 @@ func getVersionFrom(args []string) (uint64, error) {
 }
 
 type MigrateForceUpCommand struct {
-	handler *MigrationsHandler
+	handler *handler.MigrationsHandler
 	args    []string
 }
 
@@ -348,7 +332,7 @@ func (c *MigrateForceUpCommand) Exec() error {
 }
 
 type MigrateForceDownCommand struct {
-	handler *MigrationsHandler
+	handler *handler.MigrationsHandler
 	args    []string
 }
 

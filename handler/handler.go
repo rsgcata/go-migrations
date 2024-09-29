@@ -1,9 +1,12 @@
-package main
+package handler
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"sort"
+	"strconv"
+	"strings"
 
 	"github.com/rsgcata/go-migrations/execution"
 	"github.com/rsgcata/go-migrations/migration"
@@ -72,27 +75,16 @@ func NewPlan(
 	return plan, err
 }
 
-func (plan *ExecutionPlan) NextToExecute() migration.Migration {
-	finishedExecCount := plan.FinishedExecutionsCount()
-
-	if len(plan.orderedMigrations) > finishedExecCount {
-		return plan.orderedMigrations[finishedExecCount]
-	}
-
-	return nil
+func (plan *ExecutionPlan) RegisteredMigrationsCount() int {
+	return len(plan.orderedMigrations)
 }
 
-func (plan *ExecutionPlan) LastExecuted() ExecutedMigration {
-	executionsCount := len(plan.orderedExecutions)
-
-	if executionsCount > 0 {
-		return ExecutedMigration{
-			plan.orderedMigrations[executionsCount-1],
-			&plan.orderedExecutions[executionsCount-1],
-		}
+func (plan *ExecutionPlan) FinishedExecutionsCount() int {
+	count := len(plan.orderedExecutions)
+	if count > 0 && !plan.orderedExecutions[count-1].Finished() {
+		count--
 	}
-
-	return ExecutedMigration{}
+	return count
 }
 
 func (plan *ExecutionPlan) AllToBeExecuted() []migration.Migration {
@@ -120,16 +112,24 @@ func (plan *ExecutionPlan) AllExecuted() []ExecutedMigration {
 	return execMigrations
 }
 
-func (plan *ExecutionPlan) RegisteredMigrationsCount() int {
-	return len(plan.orderedMigrations)
+func (plan *ExecutionPlan) NextToExecute() migration.Migration {
+	allToBeExec := plan.AllToBeExecuted()
+
+	if len(allToBeExec) > 0 {
+		return allToBeExec[0]
+	}
+
+	return nil
 }
 
-func (plan *ExecutionPlan) FinishedExecutionsCount() int {
-	count := len(plan.orderedExecutions)
-	if count > 0 && !plan.orderedExecutions[count-1].Finished() {
-		count--
+func (plan *ExecutionPlan) LastExecuted() ExecutedMigration {
+	allExec := plan.AllExecuted()
+
+	if len(allExec) > 0 {
+		return allExec[len(allExec)-1]
 	}
-	return count
+
+	return ExecutedMigration{}
 }
 
 type ExecutionPlanBuilder func(
@@ -141,31 +141,6 @@ type MigrationsHandler struct {
 	registry         migration.MigrationsRegistry
 	repository       execution.Repository
 	newExecutionPlan ExecutionPlanBuilder
-}
-
-func (handler *MigrationsHandler) New(
-	registry migration.MigrationsRegistry,
-	repository execution.Repository,
-	newExecutionPlan ExecutionPlanBuilder,
-) (*MigrationsHandler, error) {
-	err := repository.Init()
-
-	if err != nil {
-		return nil, fmt.Errorf(
-			"could not create new migrations handler,"+
-				" failed to initialize the repository with error: %w", err,
-		)
-	}
-
-	if newExecutionPlan == nil {
-		newExecutionPlan = NewPlan
-	}
-
-	return &MigrationsHandler{
-		registry:         registry,
-		repository:       repository,
-		newExecutionPlan: newExecutionPlan,
-	}, nil
 }
 
 func NewHandler(
@@ -193,45 +168,33 @@ func NewHandler(
 	}, nil
 }
 
-func (handler *MigrationsHandler) MigrateOneUp() (ExecutedMigration, error) {
-	if handler.registry.Count() == 0 {
-		return ExecutedMigration{nil, nil}, nil
+type NumOfRuns int
+
+func NewNumOfRuns(num string) (NumOfRuns, error) {
+	var parsedNum int
+
+	if num == "all" {
+		num = "99999"
+	} else if len(strings.TrimSpace(num)) == 0 {
+		num = "1"
 	}
 
-	errMsg := "failed to migrate one up"
+	parsedNum, err := strconv.Atoi(num)
 
-	plan, err := handler.newExecutionPlan(handler.registry, handler.repository)
 	if err != nil {
-		return ExecutedMigration{nil, nil}, fmt.Errorf(
-			"%s, failed to create execution plan with error: %w", errMsg, err,
+		return NumOfRuns(1), errors.New(
+			"failed to build new num of runs from provided string." +
+				" Accepted values: integer number or \"all\"",
 		)
 	}
 
-	migrationToExec := plan.NextToExecute()
-
-	if migrationToExec == nil {
-		return ExecutedMigration{nil, nil}, nil
+	if parsedNum <= 0 {
+		parsedNum = 1
 	}
-
-	exec := execution.StartExecution(migrationToExec)
-
-	err = migrationToExec.Up()
-	if err == nil {
-		exec.FinishExecution()
-	}
-
-	saveErr := handler.repository.Save(*exec)
-
-	if err != nil || saveErr != nil {
-		err = fmt.Errorf(
-			"%s, errors: %w, %w", errMsg, err, saveErr,
-		)
-	}
-
-	return ExecutedMigration{migrationToExec, exec}, err
+	return NumOfRuns(parsedNum), nil
 }
 
-func (handler *MigrationsHandler) MigrateAllUp() ([]ExecutedMigration, error) {
+func (handler *MigrationsHandler) MigrateUp(numOfRuns NumOfRuns) ([]ExecutedMigration, error) {
 	if handler.registry.Count() == 0 {
 		return []ExecutedMigration{}, nil
 	}
@@ -246,8 +209,11 @@ func (handler *MigrationsHandler) MigrateAllUp() ([]ExecutedMigration, error) {
 	}
 
 	allToBeExec := plan.AllToBeExecuted()
+	actualNumOfRuns := min(len(allToBeExec), int(numOfRuns))
+
 	var handledMigrations []ExecutedMigration
-	for _, migrationToExec := range allToBeExec {
+	for i := 0; i < actualNumOfRuns; i++ {
+		migrationToExec := allToBeExec[i]
 		exec := execution.StartExecution(migrationToExec)
 
 		if err = migrationToExec.Up(); err == nil {
@@ -266,30 +232,7 @@ func (handler *MigrationsHandler) MigrateAllUp() ([]ExecutedMigration, error) {
 	return handledMigrations, err
 }
 
-func (handler *MigrationsHandler) MigrateOneDown() (ExecutedMigration, error) {
-	errMsg := "failed to migrate one down"
-
-	plan, err := handler.newExecutionPlan(handler.registry, handler.repository)
-	if err != nil {
-		return ExecutedMigration{nil, nil}, fmt.Errorf(
-			"%s, failed to create execution plan with error: %w", errMsg, err,
-		)
-	}
-
-	lastExec := plan.LastExecuted()
-	if lastExec.Migration == nil {
-		return ExecutedMigration{nil, nil}, nil
-	}
-
-	if err = lastExec.Migration.Down(); err != nil {
-		return ExecutedMigration{lastExec.Migration, nil}, err
-	}
-
-	err = handler.repository.Remove(*lastExec.Execution)
-	return lastExec, err
-}
-
-func (handler *MigrationsHandler) MigrateAllDown() ([]ExecutedMigration, error) {
+func (handler *MigrationsHandler) MigrateDown(numOfRuns NumOfRuns) ([]ExecutedMigration, error) {
 	errMsg := "failed to migrate all down"
 
 	plan, err := handler.newExecutionPlan(handler.registry, handler.repository)
@@ -301,8 +244,11 @@ func (handler *MigrationsHandler) MigrateAllDown() ([]ExecutedMigration, error) 
 
 	execMigrations := plan.AllExecuted()
 	slices.Reverse(execMigrations)
+	actualNumOfRuns := min(len(execMigrations), int(numOfRuns))
+
 	var handledMigrations []ExecutedMigration
-	for _, execMig := range execMigrations {
+	for i := 0; i < actualNumOfRuns; i++ {
+		execMig := execMigrations[i]
 		if err = execMig.Migration.Down(); err != nil {
 			handledMigrations = append(handledMigrations, ExecutedMigration{execMig.Migration, nil})
 			break
