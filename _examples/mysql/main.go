@@ -17,7 +17,7 @@ func main() {
 	dirPath := createMigrationsDirPath()
 	dbDsn := getDbDsn()
 	cli.Bootstrap(
-		os.Args,
+		os.Args[1:],
 		buildRegistry(dirPath, ctx, dbDsn),
 		createMysqlRepository(dbDsn, ctx),
 		dirPath,
