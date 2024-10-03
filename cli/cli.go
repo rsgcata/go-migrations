@@ -13,12 +13,15 @@ import (
 	"github.com/rsgcata/go-migrations/migration"
 )
 
+// Command The specification for all the commands the tool should expose as entrypoint, features
 type Command interface {
 	Name() string
 	Description() string
 	Exec() error
 }
 
+// Bootstrap Will bootstrap everything needed for the user CLI input, request. Will process the
+// user input and run the requested migration command
 func Bootstrap(
 	args []string,
 	registry migration.MigrationsRegistry,

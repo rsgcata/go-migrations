@@ -47,7 +47,7 @@ func createMysqlRepository(
 	dbDsn string,
 	ctx context.Context,
 ) *repository.MysqlHandler {
-	repo, err := repository.NewMysqlHandler(dbDsn, "migration_executions", ctx)
+	repo, err := repository.NewMysqlHandler(dbDsn, "migration_executions", ctx, nil)
 
 	if err != nil {
 		panic(fmt.Errorf("failed to build executions repository: %w", err))

@@ -9,6 +9,7 @@ import (
 	"github.com/rsgcata/go-migrations/execution"
 )
 
+// MysqlHandler Repository implementation for Mysql integration
 type MysqlHandler struct {
 	db        *sql.DB
 	tableName string
@@ -29,15 +30,22 @@ func newMysqlDbHandle(dsn string) (*sql.DB, error) {
 	return db, err
 }
 
+// NewMysqlHandler Builds a new MysqlHandler. If db is nil, it will try to build a db handle
+// from the provided dsn. It's preferable to not share the db handle used by the handler with
+// the one you pass in your migrations (this way, db sessions will not be mixed)
 func NewMysqlHandler(
 	dsn string,
 	tableName string,
 	ctx context.Context,
+	db *sql.DB,
 ) (*MysqlHandler, error) {
-	db, err := newMysqlDbHandle(dsn)
+	if db == nil {
+		var err error
+		db, err = newMysqlDbHandle(dsn)
 
-	if err != nil {
-		return nil, err
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return &MysqlHandler{db, tableName, ctx}, nil

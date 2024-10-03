@@ -52,6 +52,8 @@ type Repository interface {
 	FindOne(version uint64) (*MigrationExecution, error)
 }
 
+// InMemoryRepository Implementation of Repository. Can be used in unit tests.
+// All {method}Err properties can be used to force the specific method to return an error
 type InMemoryRepository struct {
 	InitErr             error
 	LoadErr             error

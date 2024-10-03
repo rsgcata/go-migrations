@@ -12,16 +12,23 @@ import (
 	"github.com/rsgcata/go-migrations/migration"
 )
 
+// ExecutedMigration Value object that groups information related to a migration execution
 type ExecutedMigration struct {
 	Migration migration.Migration
 	Execution *execution.MigrationExecution
 }
 
+// ExecutionPlan Entity which decides what can be migrated. Helpful for seeing the current
+// migrations & executions state
 type ExecutionPlan struct {
 	orderedMigrations []migration.Migration
 	orderedExecutions []execution.MigrationExecution
 }
 
+// NewPlan Creates a new ExecutionPlan. Errors if it finds that migrations and executions
+// loaded from the provided registry & repository are in an inconsistent state. An inconsistent
+// state can be: more executions in the repository than the total number of registered
+// migrations
 func NewPlan(
 	registry migration.MigrationsRegistry,
 	repository execution.Repository,
@@ -137,6 +144,8 @@ type ExecutionPlanBuilder func(
 	repository execution.Repository,
 ) (*ExecutionPlan, error)
 
+// MigrationsHandler A service which handles all migration related requests. Core service which
+// should include all behaviour related to running the migrations
 type MigrationsHandler struct {
 	registry         migration.MigrationsRegistry
 	repository       execution.Repository
@@ -168,6 +177,8 @@ func NewHandler(
 	}, nil
 }
 
+// NumOfRuns Type which is used to process the allowed user input for specifying the number
+// of migrations to run
 type NumOfRuns int
 
 func NewNumOfRuns(num string) (NumOfRuns, error) {

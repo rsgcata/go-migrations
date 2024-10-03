@@ -53,6 +53,7 @@ func createMongoRepository(
 		getDbName(),
 		getCollectionName(),
 		ctx,
+		nil,
 	)
 
 	if err != nil {

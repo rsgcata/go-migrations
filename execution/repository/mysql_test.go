@@ -49,7 +49,7 @@ func (suite *MysqlTestSuite) SetupSuite() {
 	_, _ = tmpDb.Exec("CREATE DATABASE " + suite.dbName)
 	_ = tmpDb.Close()
 
-	suite.handler, _ = NewMysqlHandler(suite.dsn, ExecutionsTable, context.Background())
+	suite.handler, _ = NewMysqlHandler(suite.dsn, ExecutionsTable, context.Background(), nil)
 	suite.db = suite.handler.db
 }
 
@@ -81,7 +81,7 @@ func (suite *MysqlTestSuite) TestItCanBuildMigrationsExclusiveDbHandle() {
 func (suite *MysqlTestSuite) TestItCanBuildHandlerWithProvidedContext() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	handler, err := NewMysqlHandler(suite.dsn, "migration_execs", ctx)
+	handler, err := NewMysqlHandler(suite.dsn, "migration_execs", ctx, nil)
 	suite.Assert().Nil(err)
 	suite.Assert().Same(ctx, handler.Context())
 }

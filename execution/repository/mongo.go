@@ -38,6 +38,7 @@ func newMongoClient(dsn string, ctx context.Context) (*mongo.Client, error) {
 	return mongo.Connect(ctx, opts)
 }
 
+// MongoHandler Repository implementation for MongoDb integration
 type MongoHandler struct {
 	client         *mongo.Client
 	databaseName   string
@@ -45,19 +46,26 @@ type MongoHandler struct {
 	ctx            context.Context
 }
 
+// NewMongoHandler Builds a new MongoHandler. If client is nil, it will try to build a client
+// from the provided dsn. It's preferable to not share the client used by the handler with
+// the one you pass in your migrations (this way, client sessions will not be mixed)
 func NewMongoHandler(
 	dsn string,
 	databaseName string,
 	collectionName string,
 	ctx context.Context,
+	client *mongo.Client,
 ) (*MongoHandler, error) {
-	db, err := newMongoClient(dsn, ctx)
+	if client == nil {
+		var err error
+		client, err = newMongoClient(dsn, ctx)
 
-	if err != nil {
-		return nil, err
+		if err != nil {
+			return nil, err
+		}
 	}
 
-	return &MongoHandler{db, databaseName, collectionName, ctx}, nil
+	return &MongoHandler{client, databaseName, collectionName, ctx}, nil
 }
 
 func (h *MongoHandler) Context() context.Context {
