@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"github.com/rsgcata/go-migrations/handler"
 	"os"
-	"sort"
 	"strconv"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/rsgcata/go-migrations/execution"
@@ -55,20 +55,16 @@ func Bootstrap(
 		inputCmd = args[0]
 	}
 
-	availableCommands := make(map[string]Command)
-
-	allUp := &MigrateUpCommand{handler: migrationsHandler, args: args}
-	allDown := &MigrateDownCommand{handler: migrationsHandler, args: args}
+	up := &MigrateUpCommand{handler: migrationsHandler, args: args}
+	down := &MigrateDownCommand{handler: migrationsHandler, args: args}
 	forceUp := &MigrateForceUpCommand{handler: migrationsHandler, args: args}
 	forceDown := &MigrateForceDownCommand{handler: migrationsHandler, args: args}
 	stats := &MigrateStatsCommand{registry: registry, repository: repository}
 	blank := &GenerateBlankMigrationCommand{dirPath}
-	availableCommands[allUp.Name()] = allUp
-	availableCommands[allDown.Name()] = allDown
-	availableCommands[forceUp.Name()] = forceUp
-	availableCommands[forceDown.Name()] = forceDown
-	availableCommands[stats.Name()] = stats
-	availableCommands[blank.Name()] = blank
+
+	availableCommands := []Command{
+		up, down, forceUp, forceDown, blank, stats,
+	}
 
 	help := &HelpCommand{availableCommands: availableCommands}
 
@@ -87,7 +83,7 @@ func Bootstrap(
 }
 
 type HelpCommand struct {
-	availableCommands map[string]Command
+	availableCommands []Command
 }
 
 func (c *HelpCommand) Name() string {
@@ -106,20 +102,40 @@ func (c *HelpCommand) Exec() error {
 	fmt.Println("Available commands:")
 	fmt.Println("")
 
-	writer := tabwriter.NewWriter(os.Stdout, 1, 1, 1, ' ', 0)
+	writer := tabwriter.NewWriter(os.Stdout, 0, 0, 1, ' ', 0)
 	_, _ = fmt.Fprintln(writer, c.Name()+"\tDisplays helpful information about this tool")
 
-	var names []string
+	chunkDescription := func(description string, size int) []string {
+		if len(description) == 0 {
+			return []string{""}
+		}
+		var chunks []string
 
-	for key := range c.availableCommands {
-		names = append(names, key)
+		accumulator := ""
+		for _, char := range description {
+			accumulator += string(char)
+			if (len(accumulator) >= size && string(char) == " ") || string(char) == "\n" {
+				chunks = append(chunks, strings.TrimSpace(accumulator))
+				accumulator = ""
+			}
+		}
+
+		if len(accumulator) > 0 {
+			chunks = append(chunks, accumulator)
+		}
+
+		return chunks
 	}
-	sort.Strings(names)
 
-	for _, name := range names {
-		_, _ = fmt.Fprintln(
-			writer, c.availableCommands[name].Name()+"\t"+c.availableCommands[name].Description(),
-		)
+	for _, command := range c.availableCommands {
+		_, _ = fmt.Fprintln(writer, "_________\t")
+		descChunks := chunkDescription(command.Description(), 80)
+		_, _ = fmt.Fprintln(writer, command.Name()+"\t"+descChunks[0])
+		if len(descChunks) > 1 {
+			for _, descChunk := range descChunks[1:] {
+				_, _ = fmt.Fprintln(writer, "\t"+descChunk)
+			}
+		}
 	}
 	_ = writer.Flush()
 
@@ -139,7 +155,8 @@ func (c *MigrateUpCommand) Description() string {
 	return "Executes Up() for the specified number of registered and not yet executed migrations." +
 		" If the number of migrations to execute is not specified, defaults to 1. Allowed" +
 		" values for the number of migrations to run Up(): \"all\", alias for 99999 and a valid" +
-		" integer greater than 0"
+		" integer greater than 0\n" +
+		"Examples: migrate up, migrate up all, migrate up 3"
 }
 
 func (c *MigrateUpCommand) Exec() error {
@@ -182,7 +199,8 @@ func (c *MigrateDownCommand) Description() string {
 	return "Executes Down() for the specified number of executed migrations." +
 		" If the number of executions is not specified, defaults to 1. Allowed" +
 		" values for the number of migrations to run Down(): \"all\", alias for 99999 and a valid" +
-		" integer greater than 0"
+		" integer greater than 0\n" +
+		"Examples: migrate down, migrate down all, migrate down 3"
 }
 
 func (c *MigrateDownCommand) Exec() error {
@@ -224,7 +242,8 @@ func (c *MigrateStatsCommand) Name() string {
 }
 
 func (c *MigrateStatsCommand) Description() string {
-	return "Displays statistics about registered migrations and executions"
+	return "Displays statistics about registered migrations and executions\n" +
+		"Examples: migrate stats"
 }
 
 func (c *MigrateStatsCommand) Exec() error {
@@ -264,7 +283,8 @@ func (c *GenerateBlankMigrationCommand) Name() string {
 }
 
 func (c *GenerateBlankMigrationCommand) Description() string {
-	return "Generates a new, blank migrations file in the configured migrations directory"
+	return "Generates a new, blank migrations file in the configured migrations directory\n" +
+		"Examples: migrate blank"
 }
 
 func (c *GenerateBlankMigrationCommand) Exec() error {
@@ -310,7 +330,8 @@ func (c *MigrateForceUpCommand) Name() string {
 
 func (c *MigrateForceUpCommand) Description() string {
 	return "Executes Up() forcefully for the provided migration version" +
-		" (even if it was executed before)"
+		" (even if it was executed before)\n" +
+		"Examples: migrate force:up 1712953077"
 }
 
 func (c *MigrateForceUpCommand) Exec() error {
@@ -342,7 +363,8 @@ func (c *MigrateForceDownCommand) Name() string {
 
 func (c *MigrateForceDownCommand) Description() string {
 	return "Executes Down() forcefully for the provided migration version" +
-		" (even if it was executed before)"
+		" (even if it was executed before)\n" +
+		"Examples: migrate force:down 1712953077"
 }
 
 func (c *MigrateForceDownCommand) Exec() error {

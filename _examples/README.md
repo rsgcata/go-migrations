@@ -3,5 +3,9 @@
 Each folder integrates with a storage type (repository) the library supports  
 To play with these examples follow the bellow steps:  
   
-1. Run from project root directory ``docker compose up -d``
-2. 
+1. Change directory to project root
+2. Start the containers: ``docker compose up -d``
+3. SSH into lib-dev container: ``docker exec -it lib-dev bash``
+4. Change directory to one of the available storage integrations: ``cd ./_examples/mysql``
+5. Build the binary: ``go build -o ./bin/migrate``
+6. Get helpful info from the migrate binary: ``./bin/migrate help``
