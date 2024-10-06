@@ -1,3 +1,5 @@
+//go:build mongo
+
 package repository
 
 import (
