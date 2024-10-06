@@ -1,8 +1,31 @@
-# GO Migrations
+# Go Migrations
 
-Db migrations library
+**A database migrations tool & library**. It's targeted for Go projects, but it can be used as a 
+standalone tool for any use case. It gives **flexibility** by allowing you to **organize and run 
+database schema changes from Go files**.
+So you are free to put any functionality you want in 
+these migrations files, even if they are not strictly related to database schema management.  
 
-# TODO
+## Use case, features, usage  
+  
+_**TLDR**_: read **README** file from **_examples** folder  
+
+"**Go migrations**" allows users to **run Go functions sequentially** and it "remembers" the functions
+that were ran so you can go back to a specific Go function or continue with new ones.  
+It is mainly targeted for **database schema management**, but it **can be used for running basic, 
+sequential workflows**.  
+  
+Each migration (or a step in a sequential workflow) is a Go file which must include a struct 
+that implements the generic "Migration" interface. So the struct must define the implementation 
+for the Version(), Up() and Down() methods.  
+- Version() must return the migration identifier. If the migration file was generated 
+  automatically from this tool (see examples README how to play with the tool), this method 
+  should not be changed.  
+- Up() must include the logic for making some changes on the database schema like adding a new 
+  column or a new table.  
+- Down() must include the logic to revert the changes done by Up()  
+  
+  
 
 - implement locking to not allow concurrency when running migrations. Only one migration run at 
   a time
