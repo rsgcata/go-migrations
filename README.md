@@ -15,27 +15,23 @@ that were ran so you can go back to a specific Go function or continue with new 
 It is mainly targeted for **database schema management**, but it **can be used for running basic, 
 sequential workflows**.  
   
-Each migration (or a step in a sequential workflow) is a Go file which must include a struct 
+Each **migration** (or a step in a sequential workflow) **is a Go file** which must include a struct 
 that implements the generic "Migration" interface. So the struct must define the implementation 
 for the Version(), Up() and Down() methods.  
-- Version() must return the migration identifier. If the migration file was generated 
+- **Version()** must return the migration identifier. If the migration file was generated 
   automatically from this tool (see examples README how to play with the tool), this method 
   should not be changed.  
-- Up() must include the logic for making some changes on the database schema like adding a new 
+- **Up()** must include the logic for making some changes on the database schema like adding a new 
   column or a new table.  
-- Down() must include the logic to revert the changes done by Up()  
+- **Down()** must include the logic to revert the changes done by Up()  
   
+The project does not include pre-built binaries so you will have to prepare a main entrypoint 
+file and build a binary on your own. **To make this easy, there are a few examples which you can 
+use, in the _examples directory**.  
+**Build tags** for storage integrations: **mysql** (works with mariadb also), **mongo** (more 
+will be added)
   
-
-- implement locking to not allow concurrency when running migrations. Only one migration run at 
-  a time
-- validation mechanism for checking if all files from migrations folder have been loaded & alert
-user if not all have been loaded (hard stop/disable any migrations run)
-- validation for executions inconsistencies: like a file has been generated with an old
-version number compared to latest executed  number
-- add to docs that users should not change the name of migration files (at least not the version number)
-- think about context and timeouts where used
-
+## Recommendations & hints  
 
 No locking is done while persisting migration execution changes in the repository.
 This is due to the fact that, in distributed systems, it's hard to manage cluster level
@@ -49,8 +45,10 @@ Up() or Down() migration functions. For example, use sql "... if not exists ..."
 a table creation idempotent. If big tables need to be populated, use transactions or custom
 checkpoints for data changes to allow retries from a checkpoint if part of the batched queries
 failed.  
-  
 
 When bootstrapping the cli, it is advised to use different db handles, one for the migrations
 repository and another for your migration files (if you need any). This is due to the fact that,
-in the SQL database scenarios, some features like `LOCK TABLES`, if used in the migration files, may conflict with the migrations repository queries. So either you make sure you are doing some cleanup in Up(), Down() migration functions,if needed, or, use different db handles, connections. 
+in the SQL database scenarios, some features like `LOCK TABLES`, if used in the migration files, 
+may conflict with the migrations repository queries. So either you make sure you are doing some 
+cleanup in Up(), Down() migration functions,if needed, or, use different db handles, connections.
+The examples from _examples folder have been implemented with these aspects in mind.
