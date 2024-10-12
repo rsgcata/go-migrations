@@ -1,3 +1,5 @@
+// Package migration includes migrations related structures and migrations registration related
+// logic.
 package migration
 
 import (

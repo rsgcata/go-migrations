@@ -1,3 +1,5 @@
+// Package handler includes handling migration executions related logic, and it can be used by
+// client code that acts as user entrypoint (for example CLI entrypoint).
 package handler
 
 import (

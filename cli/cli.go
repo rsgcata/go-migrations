@@ -1,3 +1,5 @@
+// Package cli can be used by client code to bootstrap and handle user commands executed via
+// the command line interface.
 package cli
 
 import (

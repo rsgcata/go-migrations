@@ -1,5 +1,7 @@
 //go:build mongo
 
+// Package repository includes migration execution persistence related
+// logic via execution.Repository implementations.
 package repository
 
 import (

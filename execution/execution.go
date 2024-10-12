@@ -1,3 +1,5 @@
+// Package execution includes migration execution structures and execution persistence related
+// logic via Repository implementations.
 package execution
 
 import (
