@@ -7,6 +7,7 @@ package repository
 import (
 	"context"
 	"errors"
+
 	"github.com/rsgcata/go-migrations/execution"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -93,33 +94,33 @@ func (h *MongoHandler) Init() error {
 	collectionOpts.SetValidator(
 		bson.D{
 			{
-				"$jsonSchema", bson.D{
-					{"bsonType", "object"},
-					{"title", "migration execution object validation"},
+				Key: "$jsonSchema", Value: bson.D{
+					{Key: "bsonType", Value: "object"},
+					{Key: "title", Value: "migration execution object validation"},
 					{
-						"properties", bson.D{
+						Key: "properties", Value: bson.D{
 							{
-								"_id", bson.D{
-									{"bsonType", "long"},
-									{"minimum", 0},
+								Key: "_id", Value: bson.D{
+									{Key: "bsonType", Value: "long"},
+									{Key: "minimum", Value: 0},
 									{
-										"description",
-										"_id (executed version) must be greater than 0",
+										Key:   "description",
+										Value: "_id (executed version) must be greater than 0",
 									},
 								},
 							},
 							{
-								"executedAtMs", bson.D{
-									{"bsonType", "long"},
-									{"minimum", 0},
-									{"description", "executed at must be greater than 0"},
+								Key: "executedAtMs", Value: bson.D{
+									{Key: "bsonType", Value: "long"},
+									{Key: "minimum", Value: 0},
+									{Key: "description", Value: "executed at must be greater than 0"},
 								},
 							},
 							{
-								"finishedAtMs", bson.D{
-									{"bsonType", "long"},
-									{"minimum", 0},
-									{"description", "finished at must be greater than 0"},
+								Key: "finishedAtMs", Value: bson.D{
+									{Key: "bsonType", Value: "long"},
+									{Key: "minimum", Value: 0},
+									{Key: "description", Value: "finished at must be greater than 0"},
 								},
 							},
 						},
@@ -157,25 +158,25 @@ func (h *MongoHandler) LoadExecutions() (executions []execution.MigrationExecuti
 
 func (h *MongoHandler) Save(exec execution.MigrationExecution) error {
 	collection := h.client.Database(h.databaseName).Collection(h.collectionName)
-	filter := bson.D{{"_id", exec.Version}}
+	filter := bson.D{{Key: "_id", Value: exec.Version}}
 	updateOpts := options.Update()
 	updateOpts.SetUpsert(true)
 	_, err := collection.UpdateOne(
-		h.ctx, filter, bson.D{{"$set", toBsonExecution(exec)}}, updateOpts,
+		h.ctx, filter, bson.D{{Key: "$set", Value: toBsonExecution(exec)}}, updateOpts,
 	)
 	return err
 }
 
 func (h *MongoHandler) Remove(exec execution.MigrationExecution) error {
 	collection := h.client.Database(h.databaseName).Collection(h.collectionName)
-	filter := bson.D{{"_id", exec.Version}}
+	filter := bson.D{{Key: "_id", Value: exec.Version}}
 	_, err := collection.DeleteOne(h.ctx, filter)
 	return err
 }
 
 func (h *MongoHandler) FindOne(version uint64) (*execution.MigrationExecution, error) {
 	collection := h.client.Database(h.databaseName).Collection(h.collectionName)
-	filter := bson.D{{"_id", version}}
+	filter := bson.D{{Key: "_id", Value: version}}
 
 	var result bsonExecution
 	err := collection.FindOne(h.ctx, filter).Decode(&result)

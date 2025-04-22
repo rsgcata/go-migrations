@@ -1,14 +1,17 @@
+//go:build mongo
+
 package repository
 
 import (
 	"context"
+	"os"
+	"testing"
+	"time"
+
 	"github.com/stretchr/testify/suite"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
-	"os"
-	"testing"
-	"time"
 )
 
 const MongoDnsEnv = "MONGO_DSN"
