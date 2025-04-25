@@ -28,8 +28,8 @@ for the Version(), Up() and Down() methods.
 The project does not include pre-built binaries so you will have to prepare a main entrypoint 
 file and build a binary on your own. **To make this easy, there are a few examples which you can 
 use, in the _examples directory**.  
-**Build tags** for storage integrations: **mysql** (works with mariadb also), **mongo** (more 
-will be added)
+**Build tags** for storage integrations: **mysql** (works with mariadb also), **mongo**, 
+**postgres** (more will be added)
   
 ## Recommendations & hints  
 

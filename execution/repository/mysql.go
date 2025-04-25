@@ -18,8 +18,8 @@ type MysqlHandler struct {
 	ctx       context.Context
 }
 
-func newMysqlDbHandle(dsn string) (*sql.DB, error) {
-	db, err := sql.Open("mysql", dsn)
+func newDbHandle(dsn, driverName string) (*sql.DB, error) {
+	db, err := sql.Open(driverName, dsn)
 
 	if db == nil {
 		return nil, err
@@ -43,7 +43,7 @@ func NewMysqlHandler(
 ) (*MysqlHandler, error) {
 	if db == nil {
 		var err error
-		db, err = newMysqlDbHandle(dsn)
+		db, err = newDbHandle(dsn, "mysql")
 
 		if err != nil {
 			return nil, err

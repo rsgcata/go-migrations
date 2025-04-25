@@ -1,4 +1,4 @@
-//go:build mysql
+//go:build postgres
 
 package repository
 
@@ -6,35 +6,35 @@ import (
 	"context"
 	"database/sql"
 	"os"
-	"strconv"
+	_ "strconv"
 	"strings"
 	"testing"
 
-	_ "github.com/go-sql-driver/mysql"
+	_ "github.com/lib/pq"
 	"github.com/rsgcata/go-migrations/execution"
 	"github.com/rsgcata/go-migrations/migration"
 	"github.com/stretchr/testify/suite"
 )
 
-const DnsEnv = "MYSQL_DSN"
-const DbNameEnv = "MYSQL_DATABASE"
-const ExecutionsTable = "migration_executions"
+const PostgresDsnEnv = "POSTGRES_DSN"
+const PostgresDbNameEnv = "POSTGRES_DATABASE"
+const PostgresExecutionsTable = "migration_executions"
 
-type MysqlTestSuite struct {
+type PostgresTestSuite struct {
 	suite.Suite
 	dbName  string
 	dsn     string
 	db      *sql.DB
-	handler *MysqlHandler
+	handler *PostgresHandler
 }
 
-func TestMysqlTestSuite(t *testing.T) {
-	suite.Run(t, new(MysqlTestSuite))
+func TestPostgresTestSuite(t *testing.T) {
+	suite.Run(t, new(PostgresTestSuite))
 }
 
-func (suite *MysqlTestSuite) SetupSuite() {
-	suite.dbName = os.Getenv(DbNameEnv)
-	suite.dsn = os.Getenv(DnsEnv)
+func (suite *PostgresTestSuite) SetupSuite() {
+	suite.dbName = os.Getenv(PostgresDbNameEnv)
+	suite.dsn = os.Getenv(PostgresDsnEnv)
 
 	if suite.dbName == "" {
 		// Needed if tests are ran on the host not docker
@@ -43,57 +43,77 @@ func (suite *MysqlTestSuite) SetupSuite() {
 
 	if suite.dsn == "" {
 		// Needed if tests are ran on the host not docker
-		suite.dsn = "root:123456789@tcp(localhost:3306)/" + suite.dbName
+		suite.dsn = "postgres://postgres:123456789@localhost:5432/" + suite.dbName + "?sslmode=disable"
 	}
 
-	tmpDb, _ := sql.Open("mysql", strings.TrimRight(suite.dsn, suite.dbName))
+	// Connect to postgres without database to create test database
+	tmpDsn := strings.Replace(suite.dsn, "/"+suite.dbName, "/postgres", 1)
+	tmpDb, _ := sql.Open("postgres", tmpDsn)
 	_, _ = tmpDb.Exec("DROP DATABASE IF EXISTS " + suite.dbName)
 	_, _ = tmpDb.Exec("CREATE DATABASE " + suite.dbName)
 	_ = tmpDb.Close()
 
-	suite.handler, _ = NewMysqlHandler(suite.dsn, ExecutionsTable, context.Background(), nil)
+	suite.handler, _ = NewPostgresHandler(
+		suite.dsn,
+		PostgresExecutionsTable,
+		context.Background(),
+		nil,
+	)
 	suite.db = suite.handler.db
 }
 
-func (suite *MysqlTestSuite) TearDownSuite() {
-	_, _ = suite.db.Exec("DROP DATABASE IF EXISTS " + suite.dbName)
+func (suite *PostgresTestSuite) TearDownSuite() {
+	// Close the connection before dropping the database
 	_ = suite.db.Close()
+
+	// Connect to postgres without database to drop test database
+	tmpDsn := strings.Replace(suite.dsn, "/"+suite.dbName, "/postgres", 1)
+	tmpDb, _ := sql.Open("postgres", tmpDsn)
+	//_, _ = tmpDb.Exec("DROP DATABASE IF EXISTS " + suite.dbName)
+	_ = tmpDb.Close()
 }
 
-func (suite *MysqlTestSuite) SetupTest() {
+func (suite *PostgresTestSuite) SetupTest() {
 	_ = suite.handler.Init()
-	_, _ = suite.db.Exec("DELETE FROM " + ExecutionsTable)
+	_, _ = suite.db.Exec(`DELETE FROM "` + PostgresExecutionsTable + `"`)
 }
 
-func (suite *MysqlTestSuite) TearDownTest() {
-	_, _ = suite.db.Exec("DELETE FROM " + ExecutionsTable)
+func (suite *PostgresTestSuite) TearDownTest() {
+	_, _ = suite.db.Exec(`DELETE FROM "` + PostgresExecutionsTable + `"`)
 }
 
-func (suite *MysqlTestSuite) TestItCanBuildMigrationsExclusiveDbHandle() {
-	handle, err := newDbHandle(suite.dsn, "mysql")
+func (suite *PostgresTestSuite) TestItCanBuildMigrationsExclusiveDbHandle() {
+	handle, err := newDbHandle(suite.dsn, "postgres")
 
 	suite.Assert().Nil(err)
 	suite.Assert().Equal(1, handle.Stats().MaxOpenConnections)
 
 	var dbName string
-	_ = handle.QueryRow("select database()").Scan(&dbName)
+	_ = handle.QueryRow("SELECT current_database()").Scan(&dbName)
 	suite.Assert().Equal(suite.dbName, dbName)
 }
 
-func (suite *MysqlTestSuite) TestItCanBuildHandlerWithProvidedContext() {
+func (suite *PostgresTestSuite) TestItCanBuildHandlerWithProvidedContext() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	handler, err := NewMysqlHandler(suite.dsn, "migration_execs", ctx, nil)
+	handler, err := NewPostgresHandler(suite.dsn, "migration_execs", ctx, nil)
 	suite.Assert().Nil(err)
 	suite.Assert().Same(ctx, handler.Context())
 }
 
-func (suite *MysqlTestSuite) TestItCanInitializeExecutionsTable() {
-	_, _ = suite.db.Exec("DROP TABLE IF EXISTS " + ExecutionsTable)
+func (suite *PostgresTestSuite) TestItCanInitializeExecutionsTable() {
+	_, _ = suite.db.Exec(`DROP TABLE IF EXISTS "` + PostgresExecutionsTable + `"`)
 	tableExists := func() bool {
-		var table string
-		_ = suite.db.QueryRow("SHOW TABLES LIKE '" + ExecutionsTable + "'").Scan(&table)
-		return table == ExecutionsTable
+		var exists bool
+		_ = suite.db.QueryRow(
+			`
+			SELECT EXISTS (
+				SELECT FROM pg_tables 
+				WHERE schemaname = 'public' 
+				AND tablename = $1
+			)`, PostgresExecutionsTable,
+		).Scan(&exists)
+		return exists
 	}
 
 	suite.Assert().False(tableExists())
@@ -101,23 +121,13 @@ func (suite *MysqlTestSuite) TestItCanInitializeExecutionsTable() {
 	suite.Assert().True(tableExists())
 }
 
-func executionsProvider() map[uint64]execution.MigrationExecution {
-	return map[uint64]execution.MigrationExecution{
-		uint64(1): {Version: 1, ExecutedAtMs: 2, FinishedAtMs: 3},
-		uint64(4): {Version: 4, ExecutedAtMs: 5, FinishedAtMs: 6},
-		uint64(7): {Version: 7, ExecutedAtMs: 8, FinishedAtMs: 9},
-	}
-}
-
-func (suite *MysqlTestSuite) TestItCanLoadExecutions() {
+func (suite *PostgresTestSuite) TestItCanLoadExecutions() {
 	executions := executionsProvider()
 
 	for _, exec := range executions {
 		_, _ = suite.db.Exec(
-			"insert into " + ExecutionsTable + " values (" +
-				strconv.Itoa(int(exec.Version)) + "," +
-				strconv.Itoa(int(exec.ExecutedAtMs)) + "," +
-				strconv.Itoa(int(exec.FinishedAtMs)) + ")",
+			`INSERT INTO "`+PostgresExecutionsTable+`" VALUES ($1, $2, $3)`,
+			exec.Version, exec.ExecutedAtMs, exec.FinishedAtMs,
 		)
 	}
 
@@ -132,8 +142,8 @@ func (suite *MysqlTestSuite) TestItCanLoadExecutions() {
 	suite.Assert().Len(executions, 0)
 }
 
-func (suite *MysqlTestSuite) TestItFailsToExecuteAnyChangesWhenMissingTable() {
-	_, _ = suite.db.Exec("drop table `" + ExecutionsTable + "`")
+func (suite *PostgresTestSuite) TestItFailsToExecuteAnyChangesWhenMissingTable() {
+	_, _ = suite.db.Exec(`DROP TABLE IF EXISTS "` + ExecutionsTable + `"`)
 	migrationExecution := execution.StartExecution(migration.NewDummyMigration(123))
 	_, errLoad := suite.handler.LoadExecutions()
 	errSave := suite.handler.Save(*migrationExecution)
@@ -150,19 +160,22 @@ func (suite *MysqlTestSuite) TestItFailsToExecuteAnyChangesWhenMissingTable() {
 	suite.Assert().ErrorContains(errFindOne, ExecutionsTable)
 }
 
-func (suite *MysqlTestSuite) TestItFailsToLoadExecutionsFromInvalidRepoData() {
+func (suite *PostgresTestSuite) TestItFailsToLoadExecutionsFromInvalidRepoData() {
 	_, _ = suite.db.Exec(
-		"alter table `" + ExecutionsTable +
-			"` modify column `finished_at_ms` bigint unsigned default null",
+		`ALTER TABLE "` + ExecutionsTable + `" 
+		 ALTER COLUMN finished_at_ms DROP NOT NULL`,
 	)
-	_, _ = suite.db.Exec("insert into `" + ExecutionsTable + "` values (1,2,1), (3,4,null)")
+	_, _ = suite.db.Exec(
+		`INSERT INTO "` + ExecutionsTable + `" 
+		 VALUES (1, 2, 1), (3, 4, NULL)`,
+	)
 	execs, err := suite.handler.LoadExecutions()
 	suite.Assert().Len(execs, 1)
 	suite.Assert().Error(err)
 	suite.Assert().ErrorContains(err, "Scan error")
 }
 
-func (suite *MysqlTestSuite) TestItCanSaveExecutions() {
+func (suite *PostgresTestSuite) TestItCanSaveExecutions() {
 	// Insert
 	executions := executionsProvider()
 
@@ -193,7 +206,7 @@ func (suite *MysqlTestSuite) TestItCanSaveExecutions() {
 	}
 }
 
-func (suite *MysqlTestSuite) TestItCanRemoveExecution() {
+func (suite *PostgresTestSuite) TestItCanRemoveExecution() {
 	executions := executionsProvider()
 
 	for _, exec := range executions {
@@ -207,15 +220,13 @@ func (suite *MysqlTestSuite) TestItCanRemoveExecution() {
 	suite.Assert().Len(savedExecs, 0)
 }
 
-func (suite *MysqlTestSuite) TestItCanFindOne() {
+func (suite *PostgresTestSuite) TestItCanFindOne() {
 	executions := executionsProvider()
 
 	for _, exec := range executions {
 		_, _ = suite.db.Exec(
-			"insert into " + ExecutionsTable + " values (" +
-				strconv.Itoa(int(exec.Version)) + "," +
-				strconv.Itoa(int(exec.ExecutedAtMs)) + "," +
-				strconv.Itoa(int(exec.FinishedAtMs)) + ")",
+			`INSERT INTO "`+PostgresExecutionsTable+`" VALUES ($1, $2, $3)`,
+			exec.Version, exec.ExecutedAtMs, exec.FinishedAtMs,
 		)
 	}
 
@@ -223,7 +234,7 @@ func (suite *MysqlTestSuite) TestItCanFindOne() {
 	foundExec, err := suite.handler.FindOne(uint64(4))
 	suite.Assert().Equal(&execToFind, foundExec)
 	suite.Assert().Nil(err)
-	_, _ = suite.db.Exec("delete from `" + ExecutionsTable + "`")
+	_, _ = suite.db.Exec(`DELETE FROM "` + ExecutionsTable + `"`)
 	foundExec, err = suite.handler.FindOne(uint64(4))
 	suite.Assert().Nil(foundExec)
 	suite.Assert().Nil(err)
