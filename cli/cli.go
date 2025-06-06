@@ -1,5 +1,10 @@
-// Package cli can be used by client code to bootstrap and handle user commands executed via
-// the command line interface.
+// Package cli provides functionality for building a command-line interface to manage database migrations.
+//
+// This package allows client code to bootstrap and handle user commands executed via the command
+// line.
+// It defines a Command interface that all migration commands must implement, and provides several
+// built-in commands for common migration operations like migrating up, down, generating blank
+// migrations, and displaying migration statistics.
 package cli
 
 import (
@@ -15,15 +20,44 @@ import (
 	"github.com/rsgcata/go-migrations/migration"
 )
 
-// Command The specification for all the commands the tool should expose as entrypoint, features
+// Command defines the interface that all migration commands must implement.
+// This interface serves as the specification for all commands the tool exposes as entrypoints.
 type Command interface {
+	// Name returns the command's name as it should be invoked from the command line.
+	// For example, "up", "down", "stats", etc.
 	Name() string
+
+	// Description returns a human-readable description of what the command does,
+	// including usage examples if applicable.
 	Description() string
+
+	// Exec executes the command's logic and returns an error if the execution fails.
+	// This method is called when the command is invoked from the command line.
 	Exec() error
 }
 
-// Bootstrap Will bootstrap everything needed for the user CLI input, request. Will process the
-// user input and run the requested migration command
+// Bootstrap initializes the CLI application and processes user commands.
+//
+// This function sets up all the necessary components for handling migration commands,
+// parses the command-line arguments, and executes the requested command.
+// If no command is specified or an invalid command is provided, it displays the help information.
+//
+// Parameters:
+//   - args: Command-line arguments (typically os.Args[1:])
+//   - registry: Registry containing all available migrations
+//   - repository: Repository for storing migration execution state
+//   - dirPath: Path to the directory containing migration files
+//   - newHandler: Optional function to create a custom migrations handler; if nil, the default handler.NewHandler is used
+//
+// Example:
+//
+//	cli.Bootstrap(
+//		os.Args[1:],
+//		migration.NewDirMigrationsRegistry(dirPath, allMigrations),
+//		repository.NewMysqlHandler(dbDsn, "migration_executions", ctx, nil),
+//		dirPath,
+//		nil,
+//	)
 func Bootstrap(
 	args []string,
 	registry migration.MigrationsRegistry,
@@ -87,8 +121,10 @@ func Bootstrap(
 	}
 }
 
+// HelpCommand implements the Command interface to display help information about all available commands.
+// It serves as both the default command when no command is specified and as an explicit help command.
 type HelpCommand struct {
-	availableCommands []Command
+	availableCommands []Command // List of all available commands to display information about
 }
 
 func (c *HelpCommand) Name() string {
@@ -147,9 +183,11 @@ func (c *HelpCommand) Exec() error {
 	return nil
 }
 
+// MigrateUpCommand implements the Command interface to execute the Up() method
+// of migrations that haven't been executed yet.
 type MigrateUpCommand struct {
-	handler *handler.MigrationsHandler
-	args    []string
+	handler *handler.MigrationsHandler // Handler for executing migrations
+	args    []string                   // Command-line arguments
 }
 
 func (c *MigrateUpCommand) Name() string {
@@ -191,9 +229,11 @@ func (c *MigrateUpCommand) Exec() error {
 	return err
 }
 
+// MigrateDownCommand implements the Command interface to execute the Down() method
+// of migrations that have been previously executed, effectively rolling them back.
 type MigrateDownCommand struct {
-	handler *handler.MigrationsHandler
-	args    []string
+	handler *handler.MigrationsHandler // Handler for executing migrations
+	args    []string                   // Command-line arguments
 }
 
 func (c *MigrateDownCommand) Name() string {
@@ -237,9 +277,11 @@ func (c *MigrateDownCommand) Exec() error {
 	return err
 }
 
+// MigrateStatsCommand implements the Command interface to display statistics
+// about registered migrations and their execution status.
 type MigrateStatsCommand struct {
-	registry   migration.MigrationsRegistry
-	repository execution.Repository
+	registry   migration.MigrationsRegistry // Registry containing all available migrations
+	repository execution.Repository         // Repository for accessing migration execution state
 }
 
 func (c *MigrateStatsCommand) Name() string {
@@ -279,8 +321,10 @@ func (c *MigrateStatsCommand) Exec() error {
 	return err
 }
 
+// GenerateBlankMigrationCommand implements the Command interface to create a new
+// blank migration file in the configured migrations' directory.
 type GenerateBlankMigrationCommand struct {
-	migrationsDir migration.MigrationsDirPath
+	migrationsDir migration.MigrationsDirPath // Path to the directory where migration files are stored
 }
 
 func (c *GenerateBlankMigrationCommand) Name() string {
@@ -306,6 +350,15 @@ func (c *GenerateBlankMigrationCommand) Exec() error {
 	return nil
 }
 
+// getVersionFrom extracts and validates a migration version number from command-line arguments.
+// It expects the version to be the second argument (index 1) in the args slice.
+//
+// Parameters:
+//   - args: Command-line arguments containing the migration version
+//
+// Returns:
+//   - uint64: The parsed migration version number
+//   - error: An error if the version is missing or not a valid number
 func getVersionFrom(args []string) (uint64, error) {
 	if len(args) < 2 {
 		return 0, errors.New(
@@ -324,9 +377,12 @@ func getVersionFrom(args []string) (uint64, error) {
 	return uint64(migVersion), nil
 }
 
+// MigrateForceUpCommand implements the Command interface to forcefully execute the Up() method
+// of a specific migration, even if it has been executed before.
+// This is useful for re-running migrations that need to be applied again.
 type MigrateForceUpCommand struct {
-	handler *handler.MigrationsHandler
-	args    []string
+	handler *handler.MigrationsHandler // Handler for executing migrations
+	args    []string                   // Command-line arguments containing the migration version
 }
 
 func (c *MigrateForceUpCommand) Name() string {
@@ -357,9 +413,12 @@ func (c *MigrateForceUpCommand) Exec() error {
 	return err
 }
 
+// MigrateForceDownCommand implements the Command interface to forcefully execute the Down() method
+// of a specific migration, even if it hasn't been executed or has already been rolled back.
+// This is useful for forcing the rollback of specific migrations.
 type MigrateForceDownCommand struct {
-	handler *handler.MigrationsHandler
-	args    []string
+	handler *handler.MigrationsHandler // Handler for executing migrations
+	args    []string                   // Command-line arguments containing the migration version
 }
 
 func (c *MigrateForceDownCommand) Name() string {

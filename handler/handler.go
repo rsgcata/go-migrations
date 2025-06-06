@@ -1,5 +1,11 @@
-// Package handler includes handling migration executions related logic, and it can be used by
-// client code that acts as user entrypoint (for example CLI entrypoint).
+// Package handler provides functionality for executing migrations and managing their execution state.
+//
+// This package defines the MigrationsHandler, which is the core service for running migrations,
+// and the ExecutionPlan, which determines what migrations need to be executed. It also includes
+// utilities for handling user input and managing migration execution state.
+//
+// The handler package is typically used by client code that acts as a user entrypoint,
+// such as a CLI application or a web server.
 package handler
 
 import (
@@ -14,16 +20,27 @@ import (
 	"github.com/rsgcata/go-migrations/migration"
 )
 
-// ExecutedMigration Value object that groups information related to a migration execution
+// ExecutedMigration represents a migration and its execution state.
+// It combines a Migration (the code to be executed) with a MigrationExecution
+// (the record of when it was executed and whether it completed).
 type ExecutedMigration struct {
+	// Migration is the migration that was executed
 	Migration migration.Migration
+
+	// Execution contains information about when the migration was executed
+	// and whether it completed successfully. It may be nil if the migration
+	// has not been executed yet.
 	Execution *execution.MigrationExecution
 }
 
-// ExecutionPlan Entity which decides what can be migrated. Helpful for seeing the current
-// migrations & executions state
+// ExecutionPlan determines which migrations need to be executed and in what order.
+// It maintains the state of all registered migrations and their execution status,
+// and provides methods to query this state.
 type ExecutionPlan struct {
+	// orderedMigrations contains all registered migrations in order of their version numbers
 	orderedMigrations []migration.Migration
+
+	// orderedExecutions contains all executed migrations in order of their version numbers
 	orderedExecutions []execution.MigrationExecution
 }
 
