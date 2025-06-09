@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"github.com/rsgcata/go-migrations/_examples/mongo/migrations"
 	"github.com/rsgcata/go-migrations/cli"
@@ -14,6 +15,21 @@ import (
 )
 
 func main() {
+	defer func() {
+		if err := recover(); err != nil {
+			switch v := err.(type) {
+			case string:
+				err = errors.New(v)
+			case error:
+				err = v
+			default:
+				err = errors.New(fmt.Sprint(v))
+			}
+			cmdErr := err.(error)
+			fmt.Println("[ERROR] ", cmdErr.Error())
+		}
+	}()
+
 	ctx := context.Background()
 	dirPath := createMigrationsDirPath()
 	dbDsn := getDbDsn()
@@ -22,6 +38,9 @@ func main() {
 		buildRegistry(dirPath, ctx, dbDsn, getDbName()),
 		createMongoRepository(dbDsn, ctx),
 		dirPath,
+		nil,
+		os.Stdout,
+		os.Exit,
 		nil,
 	)
 }

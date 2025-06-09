@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"github.com/rsgcata/go-migrations/_examples/mysql/migrations"
 	"github.com/rsgcata/go-migrations/cli"
@@ -13,6 +14,21 @@ import (
 )
 
 func main() {
+	defer func() {
+		if err := recover(); err != nil {
+			switch v := err.(type) {
+			case string:
+				err = errors.New(v)
+			case error:
+				err = v
+			default:
+				err = errors.New(fmt.Sprint(v))
+			}
+			cmdErr := err.(error)
+			fmt.Println("[ERROR] ", cmdErr.Error())
+		}
+	}()
+
 	ctx := context.Background()
 	dirPath := createMigrationsDirPath()
 	dbDsn := getDbDsn()
@@ -22,6 +38,13 @@ func main() {
 		createMysqlRepository(dbDsn, ctx),
 		dirPath,
 		nil,
+		os.Stdout,
+		os.Exit,
+		&cli.BootstrapSettings{
+			RunMigrationsExclusively: true,
+			RunLockFilesDirPath:      os.TempDir(),
+			MigrationsCmdLockName:    "my-app-migrations-lock",
+		},
 	)
 }
 

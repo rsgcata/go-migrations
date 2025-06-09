@@ -8,32 +8,28 @@
 package cli
 
 import (
-	"errors"
+	"flag"
 	"fmt"
+	"github.com/rsgcata/go-cli-command/cli"
+	"github.com/rsgcata/go-migrations/execution"
 	"github.com/rsgcata/go-migrations/handler"
-	"os"
+	"github.com/rsgcata/go-migrations/migration"
+	"io"
 	"strconv"
 	"strings"
-	"text/tabwriter"
-
-	"github.com/rsgcata/go-migrations/execution"
-	"github.com/rsgcata/go-migrations/migration"
 )
 
-// Command defines the interface that all migration commands must implement.
-// This interface serves as the specification for all commands the tool exposes as entrypoints.
-type Command interface {
-	// Name returns the command's name as it should be invoked from the command line.
-	// For example, "up", "down", "stats", etc.
-	Name() string
+const MigrationsCmdLockName = "rsgcata-go-migrations"
 
-	// Description returns a human-readable description of what the command does,
-	// including usage examples if applicable.
-	Description() string
+type BootstrapSettings struct {
+	// if the migration commands should lock the execution for exclusive runs
+	RunMigrationsExclusively bool
 
-	// Exec executes the command's logic and returns an error if the execution fails.
-	// This method is called when the command is invoked from the command line.
-	Exec() error
+	// The directory where the lock files will be saved
+	RunLockFilesDirPath string
+
+	// The name that will be used for generating the lock file name
+	MigrationsCmdLockName string
 }
 
 // Bootstrap initializes the CLI application and processes user commands.
@@ -51,23 +47,29 @@ type Command interface {
 //
 // Example:
 //
-//	cli.Bootstrap(
-//		os.Args[1:],
-//		migration.NewDirMigrationsRegistry(dirPath, allMigrations),
-//		repository.NewMysqlHandler(dbDsn, "migration_executions", ctx, nil),
-//		dirPath,
-//		nil,
-//	)
+//		cli.Bootstrap(
+//			os.Args[1:],
+//			migration.NewDirMigrationsRegistry(dirPath, allMigrations),
+//			repository.NewMysqlHandler(dbDsn, "migration_executions", ctx, nil),
+//			dirPath,
+//			nil,
+//			os.Stdout,
+//			os.Exit,
+//	        nil,
+//		)
 func Bootstrap(
 	args []string,
 	registry migration.MigrationsRegistry,
 	repository execution.Repository,
 	dirPath migration.MigrationsDirPath,
 	newHandler func(
-		registry migration.MigrationsRegistry,
-		repository execution.Repository,
-		newExecutionPlan handler.ExecutionPlanBuilder,
-	) (*handler.MigrationsHandler, error),
+	registry migration.MigrationsRegistry,
+	repository execution.Repository,
+	newExecutionPlan handler.ExecutionPlanBuilder,
+) (*handler.MigrationsHandler, error),
+	outputWriter io.Writer,
+	processExit func(code int),
+	settings *BootstrapSettings,
 ) {
 	if newHandler == nil {
 		newHandler = handler.NewHandler
@@ -84,145 +86,113 @@ func Bootstrap(
 		)
 	}
 
-	inputCmd := "help"
+	var up, down, forceUp, forceDown cli.Command
+	up = &MigrateUpCommand{handler: migrationsHandler}
+	down = &MigrateDownCommand{handler: migrationsHandler}
+	forceUp = &MigrateForceUpCommand{handler: migrationsHandler}
+	forceDown = &MigrateForceDownCommand{handler: migrationsHandler}
 
-	if len(args) >= 1 {
-		if args[0] == "--" {
-			args = args[1:]
+	if settings != nil && settings.RunMigrationsExclusively {
+		lockName := MigrationsCmdLockName
+		if inputLockName := strings.TrimSpace(settings.MigrationsCmdLockName); inputLockName != "" {
+			lockName = inputLockName
 		}
 
-		inputCmd = args[0]
+		up = cli.NewLockableCommandWithLockName(up, settings.RunLockFilesDirPath, lockName)
+		down = cli.NewLockableCommandWithLockName(down, settings.RunLockFilesDirPath, lockName)
+		forceUp = cli.NewLockableCommandWithLockName(
+			forceUp,
+			settings.RunLockFilesDirPath,
+			lockName,
+		)
+		forceDown = cli.NewLockableCommandWithLockName(
+			forceDown,
+			settings.RunLockFilesDirPath,
+			lockName,
+		)
 	}
 
-	up := &MigrateUpCommand{handler: migrationsHandler, args: args}
-	down := &MigrateDownCommand{handler: migrationsHandler, args: args}
-	forceUp := &MigrateForceUpCommand{handler: migrationsHandler, args: args}
-	forceDown := &MigrateForceDownCommand{handler: migrationsHandler, args: args}
 	stats := &MigrateStatsCommand{registry: registry, repository: repository}
-	blank := &GenerateBlankMigrationCommand{dirPath}
+	blank := &GenerateBlankMigrationCommand{migrationsDir: dirPath}
 
-	availableCommands := []Command{
+	availableCommands := []cli.Command{
 		up, down, forceUp, forceDown, blank, stats,
 	}
+	help := &HelpCommand{*cli.NewHelpCommand(availableCommands)}
+	availableCommands = append(availableCommands, help)
 
-	help := &HelpCommand{availableCommands: availableCommands}
-
+	cmdRegistry := cli.NewCommandsRegistry()
 	for _, cmd := range availableCommands {
-		if inputCmd == cmd.Name() {
-			if cmdErr := cmd.Exec(); cmdErr != nil {
-				fmt.Println("Failed to execute \"" + cmd.Name() + "\" with error: " + cmdErr.Error())
-			}
-			return
+		err = cmdRegistry.Register(cmd)
+		if err != nil {
+			panic(
+				fmt.Errorf(
+					"could not bootstrap cli, %s: %w",
+					"failed to register migrations with error", err,
+				),
+			)
 		}
 	}
 
-	if cmdErr := help.Exec(); cmdErr != nil {
-		fmt.Println("Failed to execute \"" + help.Name() + "\" with error: " + cmdErr.Error())
-	}
+	cli.Bootstrap(args, cmdRegistry, outputWriter, processExit)
 }
 
 // HelpCommand implements the Command interface to display help information about all available commands.
 // It serves as both the default command when no command is specified and as an explicit help command.
 type HelpCommand struct {
-	availableCommands []Command // List of all available commands to display information about
-}
-
-func (c *HelpCommand) Name() string {
-	return "help"
-}
-
-func (c *HelpCommand) Description() string {
-	return "Go Migrations is a database schema versioning tool" +
-		" which helps to easily deploy schema changes"
-}
-
-func (c *HelpCommand) Exec() error {
-	fmt.Println("")
-	fmt.Println(c.Description())
-	fmt.Println("")
-	fmt.Println("Available commands:")
-	fmt.Println("")
-
-	writer := tabwriter.NewWriter(os.Stdout, 0, 0, 1, ' ', 0)
-	_, _ = fmt.Fprintln(writer, c.Name()+"\tDisplays helpful information about this tool")
-
-	chunkDescription := func(description string, size int) []string {
-		if len(description) == 0 {
-			return []string{""}
-		}
-		var chunks []string
-
-		accumulator := ""
-		for _, char := range description {
-			accumulator += string(char)
-			if (len(accumulator) >= size && string(char) == " ") || string(char) == "\n" {
-				chunks = append(chunks, strings.TrimSpace(accumulator))
-				accumulator = ""
-			}
-		}
-
-		if len(accumulator) > 0 {
-			chunks = append(chunks, accumulator)
-		}
-
-		return chunks
-	}
-
-	for _, command := range c.availableCommands {
-		_, _ = fmt.Fprintln(writer, "_________\t")
-		descChunks := chunkDescription(command.Description(), 80)
-		_, _ = fmt.Fprintln(writer, command.Name()+"\t"+descChunks[0])
-		if len(descChunks) > 1 {
-			for _, descChunk := range descChunks[1:] {
-				_, _ = fmt.Fprintln(writer, "\t"+descChunk)
-			}
-		}
-	}
-	_ = writer.Flush()
-
-	return nil
+	cli.HelpCommand
 }
 
 // MigrateUpCommand implements the Command interface to execute the Up() method
 // of migrations that haven't been executed yet.
 type MigrateUpCommand struct {
-	handler *handler.MigrationsHandler // Handler for executing migrations
-	args    []string                   // Command-line arguments
+	steps     string
+	numOfRuns handler.NumOfRuns
+	handler   *handler.MigrationsHandler // Handler for executing migrations
 }
 
-func (c *MigrateUpCommand) Name() string {
+func (c *MigrateUpCommand) Id() string {
 	return "up"
 }
 
 func (c *MigrateUpCommand) Description() string {
-	return "Executes Up() for the specified number of registered and not yet executed migrations." +
-		" If the number of migrations to execute is not specified, defaults to 1. Allowed" +
-		" values for the number of migrations to run Up(): \"all\", alias for 99999 and a valid" +
-		" integer greater than 0\n" +
-		"Examples: migrate up, migrate up all, migrate up 3"
+	return "Executes Up() for the specified number of registered and not yet executed migrations."
 }
 
-func (c *MigrateUpCommand) Exec() error {
-	var numOfRuns handler.NumOfRuns
-	var argErr error
+func (c *MigrateUpCommand) DefineFlags(flagSet *flag.FlagSet) {
+	flagSet.StringVar(
+		&c.steps,
+		"steps",
+		"1",
+		`
+		Number of steps to execute. If the number of migrations to execute
+		is not specified,defaults to 1.
+		Allowed values for the number of migrations to run Up(): "all", 
+		alias for 99999 and a valid integer greater than 0
+		Examples: migrate up, migrate up --steps=all, migrate up --steps=3
+		`,
+	)
+}
 
-	if len(c.args) < 2 {
-		numOfRuns, argErr = handler.NewNumOfRuns("1")
-	} else {
-		numOfRuns, argErr = handler.NewNumOfRuns(c.args[1])
+func (c *MigrateUpCommand) ValidateFlags() error {
+	num, err := handler.NewNumOfRuns(c.steps)
+	if err != nil {
+		return err
 	}
+	c.numOfRuns = num
+	return nil
+}
 
-	if argErr != nil {
-		fmt.Printf("Failed to execute Up(). %s\n", argErr)
-		return argErr
-	}
-
-	execs, err := c.handler.MigrateUp(numOfRuns)
-	fmt.Printf("Executed Up() for %d migrations\n", len(execs))
+func (c *MigrateUpCommand) Exec(stdWriter io.Writer) error {
+	execs, err := c.handler.MigrateUp(c.numOfRuns)
+	_, _ = fmt.Fprintf(stdWriter, "Executed Up() for %d migrations\n", len(execs))
 
 	for _, execMig := range execs {
 		if execMig.Execution != nil {
-			fmt.Printf("Executed Up() for %d migration\n", execMig.Execution.Version)
+			_, _ = fmt.Fprintf(
+				stdWriter, "Executed Up() for %d migration\n",
+				execMig.Execution.Version,
+			)
 		}
 	}
 
@@ -232,46 +202,52 @@ func (c *MigrateUpCommand) Exec() error {
 // MigrateDownCommand implements the Command interface to execute the Down() method
 // of migrations that have been previously executed, effectively rolling them back.
 type MigrateDownCommand struct {
-	handler *handler.MigrationsHandler // Handler for executing migrations
-	args    []string                   // Command-line arguments
+	steps     string
+	numOfRuns handler.NumOfRuns
+	handler   *handler.MigrationsHandler // Handler for executing migrations
 }
 
-func (c *MigrateDownCommand) Name() string {
+func (c *MigrateDownCommand) Id() string {
 	return "down"
 }
 
 func (c *MigrateDownCommand) Description() string {
-	return "Executes Down() for the specified number of executed migrations." +
-		" If the number of executions is not specified, defaults to 1. Allowed" +
-		" values for the number of migrations to run Down(): \"all\", alias for 99999 and a valid" +
-		" integer greater than 0\n" +
-		"Examples: migrate down, migrate down all, migrate down 3"
+	return "Executes Down() for the specified number of executed migrations."
 }
 
-func (c *MigrateDownCommand) Exec() error {
-	var numOfRuns handler.NumOfRuns
-	var argErr error
+func (c *MigrateDownCommand) DefineFlags(flagSet *flag.FlagSet) {
+	flagSet.StringVar(
+		&c.steps,
+		"steps",
+		"1",
+		"Number of steps to execute."+" If the number of migrations to execute is not specified, defaults to 1. Allowed"+
+			" values for the number of migrations to run Down(): \"all\", "+
+			"alias for 99999 and a valid"+
+			" integer greater than 0\n"+
+			"Examples: migrate down, migrate down --steps=all, migrate down --steps=3",
+	)
+}
 
-	if len(c.args) < 2 {
-		numOfRuns, argErr = handler.NewNumOfRuns("1")
-	} else {
-		numOfRuns, argErr = handler.NewNumOfRuns(c.args[1])
+func (c *MigrateDownCommand) ValidateFlags() error {
+	num, err := handler.NewNumOfRuns(c.steps)
+	if err != nil {
+		return err
 	}
+	c.numOfRuns = num
+	return nil
+}
 
-	if argErr != nil {
-		fmt.Printf("Failed to execute Down(). %s\n", argErr)
-		return argErr
-	}
+func (c *MigrateDownCommand) Exec(stdWriter io.Writer) error {
+	execs, err := c.handler.MigrateDown(c.numOfRuns)
+	_, _ = fmt.Fprintf(stdWriter, "Executed Down() for %d migrations\n", len(execs))
 
-	execs, err := c.handler.MigrateDown(numOfRuns)
-
-	fmt.Printf("Executed Down() for %d migrations\n", len(execs))
-
-	for _, mig := range execs {
-		if mig.Execution != nil {
-			fmt.Printf("Executed Down() for %d migration\n", mig.Execution.Version)
+	for _, execMig := range execs {
+		if execMig.Execution != nil {
+			_, _ = fmt.Fprintf(
+				stdWriter, "Executed Down() for %d migration\n",
+				execMig.Execution.Version,
+			)
 		}
-
 	}
 
 	return err
@@ -280,11 +256,12 @@ func (c *MigrateDownCommand) Exec() error {
 // MigrateStatsCommand implements the Command interface to display statistics
 // about registered migrations and their execution status.
 type MigrateStatsCommand struct {
+	cli.CommandWithoutFlags
 	registry   migration.MigrationsRegistry // Registry containing all available migrations
 	repository execution.Repository         // Repository for accessing migration execution state
 }
 
-func (c *MigrateStatsCommand) Name() string {
+func (c *MigrateStatsCommand) Id() string {
 	return "stats"
 }
 
@@ -293,7 +270,7 @@ func (c *MigrateStatsCommand) Description() string {
 		"Examples: migrate stats"
 }
 
-func (c *MigrateStatsCommand) Exec() error {
+func (c *MigrateStatsCommand) Exec(stdWriter io.Writer) error {
 	plan, err := handler.NewPlan(c.registry, c.repository)
 
 	if plan != nil {
@@ -311,11 +288,21 @@ func (c *MigrateStatsCommand) Exec() error {
 				strconv.Itoa(int(prev.Version())) + ".go"
 		}
 
-		fmt.Println("")
-		fmt.Printf("Registered migrations count: %d\n", plan.RegisteredMigrationsCount())
-		fmt.Printf("Executions count: %d\n", plan.FinishedExecutionsCount())
-		fmt.Printf("Next to execute migration file: %s\n", nextMigFile)
-		fmt.Printf("Last executed migration file: %s\n", lastMigFile)
+		_, _ = fmt.Fprintln(stdWriter, "")
+		_, _ = fmt.Fprintf(
+			stdWriter,
+			"Registered migrations count: %d\n",
+			plan.RegisteredMigrationsCount(),
+		)
+		_, _ = fmt.Fprintf(
+			stdWriter, "Executions count: %d\n", plan.FinishedExecutionsCount(),
+		)
+		_, _ = fmt.Fprintf(
+			stdWriter, "Next to execute migration file: %s\n", nextMigFile,
+		)
+		_, _ = fmt.Fprintf(
+			stdWriter, "Last executed migration file: %s\n", lastMigFile,
+		)
 	}
 
 	return err
@@ -324,10 +311,11 @@ func (c *MigrateStatsCommand) Exec() error {
 // GenerateBlankMigrationCommand implements the Command interface to create a new
 // blank migration file in the configured migrations' directory.
 type GenerateBlankMigrationCommand struct {
+	cli.CommandWithoutFlags
 	migrationsDir migration.MigrationsDirPath // Path to the directory where migration files are stored
 }
 
-func (c *GenerateBlankMigrationCommand) Name() string {
+func (c *GenerateBlankMigrationCommand) Id() string {
 	return "blank"
 }
 
@@ -336,37 +324,22 @@ func (c *GenerateBlankMigrationCommand) Description() string {
 		"Examples: migrate blank"
 }
 
-func (c *GenerateBlankMigrationCommand) Exec() error {
+func (c *GenerateBlankMigrationCommand) Exec(stdWriter io.Writer) error {
 	fileName, err := migration.GenerateBlankMigration(c.migrationsDir)
 
 	if err != nil {
 		return err
 	}
 
-	fmt.Println("")
-	fmt.Println("New blank migration file generated: " + fileName)
-	fmt.Println("")
+	_, _ = fmt.Fprintln(stdWriter, "")
+	_, _ = fmt.Fprintln(stdWriter, "New blank migration file generated: "+fileName)
+	_, _ = fmt.Fprintln(stdWriter, "")
 
 	return nil
 }
 
-// getVersionFrom extracts and validates a migration version number from command-line arguments.
-// It expects the version to be the second argument (index 1) in the args slice.
-//
-// Parameters:
-//   - args: Command-line arguments containing the migration version
-//
-// Returns:
-//   - uint64: The parsed migration version number
-//   - error: An error if the version is missing or not a valid number
-func getVersionFrom(args []string) (uint64, error) {
-	if len(args) < 2 {
-		return 0, errors.New(
-			"migration version is expected to be the second argument. None provided",
-		)
-	}
-
-	migVersion, err := strconv.Atoi(args[1])
+func getVersionFrom(rawVersion string) (uint64, error) {
+	migVersion, err := strconv.Atoi(rawVersion)
 
 	if err != nil {
 		return 0, fmt.Errorf(
@@ -381,33 +354,49 @@ func getVersionFrom(args []string) (uint64, error) {
 // of a specific migration, even if it has been executed before.
 // This is useful for re-running migrations that need to be applied again.
 type MigrateForceUpCommand struct {
-	handler *handler.MigrationsHandler // Handler for executing migrations
-	args    []string                   // Command-line arguments containing the migration version
+	rawVersion string
+	migVersion uint64
+	handler    *handler.MigrationsHandler // Handler for executing migrations
 }
 
-func (c *MigrateForceUpCommand) Name() string {
+func (c *MigrateForceUpCommand) Id() string {
 	return "force:up"
 }
 
 func (c *MigrateForceUpCommand) Description() string {
 	return "Executes Up() forcefully for the provided migration version" +
-		" (even if it was executed before)\n" +
-		"Examples: migrate force:up 1712953077"
+		" (even if it was executed before)\n"
 }
 
-func (c *MigrateForceUpCommand) Exec() error {
-	migVersion, err := getVersionFrom(c.args)
+func (c *MigrateForceUpCommand) DefineFlags(flagSet *flag.FlagSet) {
+	flagSet.StringVar(
+		&c.rawVersion,
+		"version",
+		"",
+		"Version number for force up.\n"+
+			"Examples: migrate force:up --version=1712953077",
+	)
+}
 
+func (c *MigrateForceUpCommand) ValidateFlags() error {
+	version, err := getVersionFrom(c.rawVersion)
 	if err != nil {
 		return err
 	}
+	c.migVersion = version
+	return nil
+}
 
-	exec, err := c.handler.ForceUp(migVersion)
+func (c *MigrateForceUpCommand) Exec(stdWriter io.Writer) error {
+	exec, err := c.handler.ForceUp(c.migVersion)
 
 	if exec.Execution != nil {
-		fmt.Printf("Executed Up() forcefully for %d migration\n", exec.Execution.Version)
+		_, _ = fmt.Fprintf(
+			stdWriter, "Executed Up() forcefully for %d migration\n",
+			exec.Execution.Version,
+		)
 	} else {
-		fmt.Print("No forced Up() migration executed\n")
+		_, _ = fmt.Fprintln(stdWriter, "No forced Up() migration executed")
 	}
 
 	return err
@@ -417,33 +406,49 @@ func (c *MigrateForceUpCommand) Exec() error {
 // of a specific migration, even if it hasn't been executed or has already been rolled back.
 // This is useful for forcing the rollback of specific migrations.
 type MigrateForceDownCommand struct {
-	handler *handler.MigrationsHandler // Handler for executing migrations
-	args    []string                   // Command-line arguments containing the migration version
+	rawVersion string
+	migVersion uint64
+	handler    *handler.MigrationsHandler // Handler for executing migrations
 }
 
-func (c *MigrateForceDownCommand) Name() string {
+func (c *MigrateForceDownCommand) Id() string {
 	return "force:down"
 }
 
 func (c *MigrateForceDownCommand) Description() string {
 	return "Executes Down() forcefully for the provided migration version" +
-		" (even if it was executed before)\n" +
-		"Examples: migrate force:down 1712953077"
+		" (even if it was executed before)\n"
 }
 
-func (c *MigrateForceDownCommand) Exec() error {
-	migVersion, err := getVersionFrom(c.args)
+func (c *MigrateForceDownCommand) DefineFlags(flagSet *flag.FlagSet) {
+	flagSet.StringVar(
+		&c.rawVersion,
+		"version",
+		"",
+		"Version number for force down.\n"+
+			"Examples: migrate force:down --version=1712953077",
+	)
+}
 
+func (c *MigrateForceDownCommand) ValidateFlags() error {
+	version, err := getVersionFrom(c.rawVersion)
 	if err != nil {
 		return err
 	}
+	c.migVersion = version
+	return nil
+}
 
-	exec, err := c.handler.ForceDown(migVersion)
+func (c *MigrateForceDownCommand) Exec(stdWriter io.Writer) error {
+	exec, err := c.handler.ForceDown(c.migVersion)
 
 	if exec.Execution != nil {
-		fmt.Printf("Executed Down() forcefully for %d migration\n", exec.Execution.Version)
+		_, _ = fmt.Fprintf(
+			stdWriter, "Executed Down() forcefully for %d migration\n",
+			exec.Execution.Version,
+		)
 	} else {
-		fmt.Print("No forced Down() migration executed\n")
+		_, _ = fmt.Fprintln(stdWriter, "No forced Down() migration executed")
 	}
 
 	return err

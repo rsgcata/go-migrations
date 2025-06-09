@@ -1,5 +1,5 @@
 # Base backend build step
-FROM golang:1.22.2-bullseye AS go-base
+FROM golang:1.24-bullseye AS go-base
 
 ARG APP_BASE_DIR
 

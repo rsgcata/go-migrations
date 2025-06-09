@@ -187,11 +187,21 @@ func (registry *DirMigrationsRegistry) AssertValidRegistry() {
 	}
 
 	if !allRegistered {
+		notRegisteredMigrations := strings.Join(notRegistered, ", ")
+		extraMigrations := strings.Join(extraRegistered, ", ")
+		if notRegisteredMigrations == "" {
+			notRegisteredMigrations = "none"
+		}
+		if extraMigrations == "" {
+			extraMigrations = "none"
+		}
+
 		panic(
 			fmt.Errorf(
-				"registry has invalid state. Not registered: %s. Extra migrations: %s",
-				strings.Join(notRegistered, ", "),
-				strings.Join(extraRegistered, ", "),
+				"registry has invalid state. %s. Not registered: %s. Extra migrations: %s",
+				"You must register all migrations before running migrations",
+				notRegisteredMigrations,
+				extraMigrations,
 			),
 		)
 	}
