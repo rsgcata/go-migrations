@@ -33,7 +33,7 @@ use, in the _examples directory**.
   
 ## Recommendations & hints  
 
-No locking is done while persisting migration execution changes in the repository.
+No database locking is done while persisting migration execution changes in the repository.
 This is due to the fact that, in distributed systems, it's hard to manage cluster level
 locking (for example, at the time of writing, year 2024, MariaDB does not support advisory locking or table locks with Galera Cluster).
 It is preferred to give locking control to the caller, for example, if automatic migrations
@@ -45,6 +45,11 @@ Up() or Down() migration functions. For example, use sql "... if not exists ..."
 a table creation idempotent. If big tables need to be populated, use transactions or custom
 checkpoints for data changes to allow retries from a checkpoint if part of the batched queries
 failed.  
+  
+The only locking mechanism, at the moment, can be obtained at service level (OS level), by 
+providing the right settings when bootstrapping the migrations tool. The locking mechanism is 
+based on file locks (maybe more will be added in the future, like Redis or Etcd for implementing 
+a semaphore).  
 
 When bootstrapping the cli, it is advised to use different db handles, one for the migrations
 repository and another for your migration files (if you need any). This is due to the fact that,
